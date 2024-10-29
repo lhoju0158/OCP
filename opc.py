@@ -3,116 +3,132 @@ import gymnasium as gym
 from or_gym.utils import assign_env_config
 from gymnasium import spaces
 
-class OCPEnv_1(gym.Env):
+class OCPEnv(gym.Env):
     def __init__(self, *args, **kwargs):
-        # 
-        # 캐시와 대역폭 용량 초기화
-        self.cache_capacity = 1  # 각 노드의 캐시 용량
-        self.bandwidth_capacity = 1  # 각 노드의 대역폭 용량
-        self.t_interval = 20  # 시간 간격
-        self.tol = 1e-5  # 허용 오차 (수치 계산의 안정성을 위한)
-        self.step_limit = int(60 * 24 / self.t_interval)  # 하루를 시간 간격으로 나눈 스텝 수
-        self.n_nodes = 50  # 캐시 노드(프록시)의 수
-        self.load_idx = np.array([1, 2])  # 대역폭과 저장 공간 인덱스
-        self.seed = 0  # 난수 시드 초기화
-        self.mask = True  # 마스크를 사용해 유효한 액션을 필터링할지 여부
+        # Initialize environment settings based on input configuration
         assign_env_config(self, kwargs)
-        self.action_space = spaces.Discrete(self.n_nodes)  # 행동 공간: 특정 노드를 선택
-        self.valid_actions = [1] * self.n_nodes  # 유효한 액션 (초기값은 모든 노드가 가능함)
 
-        # 관찰 공간 설정 (마스킹을 통해 유효한 행동을 제한할 수 있음)
+        # Single proxy 
+        self.cache_capacity = 1  # Cache capacity per proxy
+        self.bandwidth_capacity = 1  # Bandwidth capacity per proxy
+        self.n_nodes = 50  # Number of proxy nodes
+
+        # Video object
+        self.n_objects = 100  # Number of video objects based on the reference paper
+
+        # Environment
+        self.t_interval = 20  # Time interval
+        self.tol = 1e-5  # Tolerance for numerical stability
+        self.step_limit = int(60 * 24 / self.t_interval)  # Total steps per day based on time intervals
+        self.seed = 1234  # Initialize random seed
+        self.mask = True  # Whether to use a mask to filter valid actions
+
+        # Action space now allows each object to be partially assigned to multiple nodes (binary choices)
+        self.action_space = spaces.MultiBinary(self.n_objects * self.n_nodes)  # Each entry represents a binary choice for each object-node pair
+        
+        # Initialize valid actions for each object
+        # set all actions are valiable
+        self.proxy_validity_mask = np.ones((self.n_objects, self.n_nodes), dtype=int)
+        
+        # Observation space includes action masks, available actions, and state (proxy status + demand)
         if self.mask:
             self.observation_space = spaces.Dict({
-                "action_mask": spaces.Box(0, 1, shape=(self.n_nodes,)),  # 유효한 액션을 표시하는 마스크
-                "avail_actions": spaces.Box(0, 1, shape=(self.n_nodes,)),  # 가능한 액션
-                "state": spaces.Box(0, 1, shape=(self.n_nodes + 1, 3))  # 현재 노드 상태 + 수요
+                "action_mask": spaces.Box(0, 1, shape=(self.n_objects, self.n_nodes)),  # Mask for each object's valid actions
+                "avail_actions": spaces.Box(0, 1, shape=(self.n_nodes,)),  # Available actions
+                "state": spaces.Box(0, 1, shape=(self.n_nodes + self.n_objects, 3))  # Node states + object states
             })
         else:
-            self.observation_space = spaces.Box(0, 1, shape=(self.n_nodes + 1, 3))  # 마스크 사용 안할 시 전체 상태
-        self.reset()
+            self.observation_space = spaces.Box(0, 1, shape=(self.n_nodes + self.n_objects, 3))
         
+        self.reset()
+
     def _RESET(self):
-        # 환경 초기화 시 수요를 생성하고 초기 상태를 설정
-        self.demand = self.generate_demand()  # 각 스텝에서 필요한 대역폭 및 저장 공간 수요 생성
-        self.current_step = 0  # 현재 스텝 초기화
+        # Generate demand and initialize state when resetting the environment
+        self.demand = self.generate_demand()  # Generate bandwidth and storage demands for each object
+        self.current_step = 0  # Initialize current step
         self.state = {
-            "action_mask": np.ones(self.n_nodes),  # 초기에는 모든 액션이 유효함
-            "avail_actions": np.ones(self.n_nodes),  # 사용 가능한 액션
+            "action_mask": np.ones((self.n_objects, self.n_nodes)),  # Initialize valid actions for each object
+            "avail_actions": np.ones(self.n_nodes),  # Available actions
             "state": np.vstack([
-                np.zeros((self.n_nodes, 3)),  # 각 노드의 초기 상태 (비활성화됨)
-                self.demand[self.current_step]])  # 현재 스텝의 수요 추가
+                np.zeros((self.n_nodes, 3)),  # Initialize state for each proxy node
+                self.demand[self.current_step]])  # Add demand for the current step
         }
-        self.assignment = {}  # 각 스텝마다 수행된 액션을 기록
-        self.valid_actions = [1] * self.n_nodes  # 모든 액션을 유효로 초기화
+        self.assignment = {}  # Record actions taken at each step
+        self.proxy_validity_mask = np.ones((self.n_objects, self.n_nodes), dtype=int)  # Initialize valid actions for all objects
         return self.state, {}
     
-    def _STEP(self, action):
-        # 주어진 액션을 수행하여 상태를 업데이트하고 보상 계산
+    def _STEP(self, actions):
+        # Expecting a MultiBinary array for actions, each entry representing an object-node pair
         done = False
         truncated = False
-        node_state = self.state["state"][:-1]  # 마지막 행을 제외한 노드 상태
-        demand = self.state["state"][-1, 1:]  # 현재 스텝에서 필요한 대역폭 및 저장 용량
+        node_state = self.state["state"][:self.n_nodes]  # Extract node state
+        object_demand = self.state["state"][self.n_nodes:]  # Extract demand of objects
         
-        if action < 0 or action >= self.n_nodes:
-            raise ValueError("Invalid action: {}".format(action))  # 유효하지 않은 액션 처리
-            
-        elif any(node_state[action, 1:] + demand > 1 + self.tol):
-            # 수요가 선택된 노드의 용량을 초과할 경우, 페널티 부여 및 에피소드 종료
-            reward = -1000
-            done = True
-        else:
-            if node_state[action, 0] == 0:
-                # 선택된 노드가 비활성 상태인 경우, 활성화
-                node_state[action, 0] = 1
-            node_state[action, self.load_idx] += demand  # 노드에 수요 할당
-            reward = np.sum(node_state[:, 0] * (node_state[:, 1:].sum(axis=1) - 2))  # 보상 계산
-            self.assignment[self.current_step] = action  # 수행된 액션 기록
-            
+        # Reshape actions to (n_objects, n_nodes) to map each object-node pair
+        actions = actions.reshape(self.n_objects, self.n_nodes)
+
+        # Iterate over each object and check assignment across multiple nodes
+        for obj_idx, obj_actions in enumerate(actions):
+            demand = object_demand[obj_idx, 1:]  # Get bandwidth and storage demands for the object
+
+            # Calculate the total demand each node would receive based on the current object's allocation
+            for node_idx, assign in enumerate(obj_actions):
+                if assign == 1:  # Only allocate if action is 1 for that object-node pair
+                    if all(node_state[node_idx, 1:] + demand <= 1 + self.tol):  # Check if demand fits within node's capacity
+                        # Allocate demand to the node
+                        if node_state[node_idx, 0] == 0:
+                            node_state[node_idx, 0] = 1  # Activate the node if inactive
+                        node_state[node_idx, 1:] += demand  # Add demand to node
+                        reward = np.sum(node_state[:, 0] * (node_state[:, 1:].sum(axis=1) - 2))  # Calculate reward
+                        self.assignment[self.current_step] = (obj_idx, node_idx)  # Record assignment
+                    else:
+                        reward = -1000  # Penalty if allocation is not possible
+                        done = True
+                        break
+
         self.current_step += 1
         if self.current_step >= self.step_limit:
-            done = True  # 스텝이 제한을 초과하면 에피소드 종료
+            done = True  # End the episode if the step limit is exceeded
         self.update_state(node_state)
         return self.state, reward, done, truncated, {}
     
     def update_state(self, node_state):
-        # 노드 상태 업데이트 및 액션 마스크 재설정
+        # Update node state and reset action masks for each object
         step = self.current_step if self.current_step < self.step_limit else self.step_limit - 1
-        data_center = np.vstack([node_state, self.demand[step]])  # 노드 상태와 현재 수요 병합
-        data_center = np.where(data_center > 1, 1, data_center)  # 용량 초과 부분은 최대치로 클리핑
+        data_center = np.vstack([node_state, self.demand[step]])
+        data_center = np.where(data_center > 1, 1, data_center)  # Clip values exceeding capacity to maximum
         self.state["state"] = data_center
 
-        # 현재 시점에서 유효한 액션 마스크 생성
-        if self.mask:
-            action_mask = (node_state[:, 1:] + self.demand[step, 1:]) <= 1
-            self.valid_actions = (action_mask.sum(axis=1) == 2).astype(int)  # 수용 가능한 노드를 1로 표시
-            self.state["action_mask"] = self.valid_actions
-        else:
-            self.valid_actions = [1] * self.n_nodes
-            self.state["action_mask"] = np.ones(self.n_nodes)
+        # Create valid action masks for each object at the current step
+        for obj_idx, demand in enumerate(self.demand[self.current_step]):
+            action_mask = (node_state[:, 1:] + demand[1:]) <= 1  # Compare demand of each object with proxy nodes
+            self.proxy_validity_mask[obj_idx] = (action_mask.sum(axis=1) == 2).astype(int)  # Mark valid nodes as 1
+        
+        self.state["action_mask"] = self.proxy_validity_mask
 
     def sample_action(self):
-        # 랜덤한 액션 샘플링
+        # Sample a random action for each object-node pair
         return self.action_space.sample()
 
     def generate_demand(self):
-        # 비디오 수요 생성 (예: 대역폭 및 저장 공간 필요량)
+        # Generate video demand (e.g., required bandwidth and storage space)
         n = self.step_limit
-        zipf_skew = 0.7  # Zipf 분포의 스큐 파라미터
-        mem_probs = np.array([0.12, 0.165, 0.328, 0.287, 0.064, 0.036])  # 메모리 수요 분포
-        mem_bins = np.array([0.1, 0.2, 0.4, 0.6, 0.8, 1.0])  # 메모리 수요 범주
-        cpu_demand = np.random.normal(loc=0.5, scale=0.1, size=n)  # 평균 0.5, 표준편차 0.1로 설정된 CPU 수요
-        cpu_demand = np.clip(cpu_demand, 0, 1)  # 0과 1 사이로 값 제한
-        mem_demand = np.random.choice(mem_bins, p=mem_probs, size=n)  # 메모리 수요 샘플링
-        return np.vstack([np.arange(n) / n, cpu_demand, mem_demand]).T
-
-    def step(self, action):
-        # 외부에서 호출되는 실제 스텝 함수
-        return self._STEP(action)
+        zipf_skew = 0.7  # Skew parameter for Zipf distribution
+        mem_probs = np.array([0.12, 0.165, 0.328, 0.287, 0.064, 0.036])  # Memory demand distribution
+        mem_bins = np.array([0.1, 0.2, 0.4, 0.6, 0.8, 1.0])  # Memory demand categories
+        cpu_demand = np.random.normal(loc=0.5, scale=0.1, size=(self.n_objects, n))  # Generate demand for each object
+        cpu_demand = np.clip(cpu_demand, 0, 1)  # Limit values to between 0 and 1
+        mem_demand = np.random.choice(mem_bins, p=mem_probs, size=(self.n_objects, n))  # Sample memory demand
+        return np.array([np.column_stack([np.arange(n) / n, cpu_demand[i], mem_demand[i]]) for i in range(self.n_objects)])
+    
+    def step(self, actions):
+        # Main step function called externally
+        return self._STEP(actions)
 
     def reset(self, **kwargs):
-        # 환경을 초기 상태로 재설정
+        # Reset the environment to the initial state
         return self._RESET()
 
     def valid_action_mask(self):
-        # 현재 상태에서 유효한 액션 마스크 반환
-        return self.valid_actions
+        # Return the valid action mask for each object at the current state
+        return self.proxy_validity_mask

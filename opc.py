@@ -3,7 +3,7 @@ import gymnasium as gym
 from or_gym.utils import assign_env_config
 from gymnasium import spaces
 
-class OCPEnv(gym.Env):
+class OCPEnv_1(gym.Env):
     def __init__(self, *args, **kwargs):
         # Initialize environment settings based on input configuration
         assign_env_config(self, kwargs)
@@ -40,21 +40,33 @@ class OCPEnv(gym.Env):
         else:
             self.observation_space = spaces.Box(0, 1, shape=(self.n_nodes + self.n_objects, 3))
         
+        # for debugging
+        print(f"In __init__: self.observation_space['state'] shape = {self.observation_space['state'].shape}") # self.state['state'] shape = (122, 3)
+
         self.reset()
 
     def _RESET(self):
         # Generate demand and initialize state when resetting the environment
         self.demand = self.generate_demand()  # Generate bandwidth and storage demands for each object
         self.current_step = 0  # Initialize current step
+
+
+
         self.state = {
             "action_mask": np.ones((self.n_objects, self.n_nodes)),  # Initialize valid actions for each object
             "avail_actions": np.ones(self.n_nodes),  # Available actions
             "state": np.vstack([
-                np.zeros((self.n_nodes, 3)),  # Initialize state for each proxy node
+                np.zeros((self.n_nodes + self.n_objects, 3)),  # Initialize state for each proxy node
                 self.demand[self.current_step]])  # Add demand for the current step
         }
         self.assignment = {}  # Record actions taken at each step
         self.proxy_validity_mask = np.ones((self.n_objects, self.n_nodes), dtype=int)  # Initialize valid actions for all objects
+        
+        # for debugging
+        # print(f"self.n_nodes = {self.n_nodes}") # self.n_nodes = 50
+        # print(f"self.demand[self.current_step].shape = {self.demand[self.current_step].shape}") # self.demand[self.current_step].shape = (72, 3)
+        print(f"In __RESET: self.state['state'] shape = {self.state['state'].shape}") # After reset(): self.state['state'] shape = (122, 3)
+
         return self.state, {}
     
     def _STEP(self, actions):
@@ -110,16 +122,8 @@ class OCPEnv(gym.Env):
         # Sample a random action for each object-node pair
         return self.action_space.sample()
 
-    def generate_demand(self):
-        # Generate video demand (e.g., required bandwidth and storage space)
-        n = self.step_limit
-        zipf_skew = 0.7  # Skew parameter for Zipf distribution
-        mem_probs = np.array([0.12, 0.165, 0.328, 0.287, 0.064, 0.036])  # Memory demand distribution
-        mem_bins = np.array([0.1, 0.2, 0.4, 0.6, 0.8, 1.0])  # Memory demand categories
-        cpu_demand = np.random.normal(loc=0.5, scale=0.1, size=(self.n_objects, n))  # Generate demand for each object
-        cpu_demand = np.clip(cpu_demand, 0, 1)  # Limit values to between 0 and 1
-        mem_demand = np.random.choice(mem_bins, p=mem_probs, size=(self.n_objects, n))  # Sample memory demand
-        return np.array([np.column_stack([np.arange(n) / n, cpu_demand[i], mem_demand[i]]) for i in range(self.n_objects)])
+    # def generate_demand(self):
+    #     return self.generate_demand_random()
     
     def step(self, actions):
         # Main step function called externally
@@ -132,3 +136,49 @@ class OCPEnv(gym.Env):
     def valid_action_mask(self):
         # Return the valid action mask for each object at the current state
         return self.proxy_validity_mask
+
+    def generate_demand(self):
+        # Number of steps per day (e.g., 72 assessments throughout the day)
+        n = self.step_limit  # Total steps representing assessments in a day
+        
+        # Probability distribution and categories for storage demand
+        storage_probs = np.array([0.12, 0.165, 0.328, 0.287, 0.064, 0.036])
+        storage_bins = np.array([0.1, 0.2, 0.4, 0.6, 0.8, 1.0])
+
+        # Generate bandwidth demand using a normal distribution, clipped to 0-1 range
+        bandwidth_demand = np.random.normal(loc=0.5, scale=0.1, size=(self.n_objects, n))
+        bandwidth_demand = np.clip(bandwidth_demand, 0, 1)  # Ensure demand is within 0 to 1
+
+        # Sample storage demand for each video object from specified bins
+        storage_demand = np.random.choice(storage_bins, p=storage_probs, size=(self.n_objects, n))
+
+        # Combine time ratio, bandwidth, and storage demand for each object, resulting in (72, 3) for each object
+        return np.array([
+            np.column_stack([np.arange(n) / n, bandwidth_demand[i], storage_demand[i]])
+            for i in range(self.n_objects)
+        ])
+    
+    def generate_demand_zipf(self):
+        # Number of steps per day (e.g., 72 assessments throughout the day)
+        n = self.step_limit  # Total steps representing assessments in a day
+        
+        # Zipf distribution parameter to skew bandwidth demand
+        zipf_skew = 2.0  # Higher values increase skewness
+        
+        # Probability distribution and categories for storage demand
+        storage_probs = np.array([0.12, 0.165, 0.328, 0.287, 0.064, 0.036])
+        storage_bins = np.array([0.1, 0.2, 0.4, 0.6, 0.8, 1.0])
+
+        # Generate bandwidth demand based on Zipf distribution
+        # Zipf distribution provides demand indices with skewness, then scaled to 0-1
+        zipf_indices = np.random.zipf(zipf_skew, size=(self.n_objects, n))
+        bandwidth_demand = np.clip(zipf_indices / zipf_indices.max(), 0, 1)  # Scale values to between 0 and 1
+
+        # Sample storage demand for each video object from specified bins
+        storage_demand = np.random.choice(storage_bins, p=storage_probs, size=(self.n_objects, n))
+
+        # Combine time ratio, bandwidth, and storage demand for each object, resulting in (72, 3) for each object
+        return np.array([
+            np.column_stack([np.arange(n) / n, bandwidth_demand[i], storage_demand[i]])
+            for i in range(self.n_objects)
+        ])

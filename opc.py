@@ -34,15 +34,14 @@ class OCPEnv_1(gym.Env):
         if self.mask:
             self.observation_space = spaces.Dict({
                 "action_mask": spaces.Box(0, 1, shape=(self.n_objects, self.n_nodes)),  # Mask for each object's valid actions
-                "avail_actions": spaces.Box(0, 1, shape=(self.n_nodes,)),  # Available actions
                 "state": spaces.Box(0, 1, shape=(self.n_nodes + self.n_objects, 3))  # Node states + object states
             })
         else:
             self.observation_space = spaces.Box(0, 1, shape=(self.n_nodes + self.n_objects, 3))
         
         # for debugging
-        print(f"In __init__: self.observation_space['state'] shape = {self.observation_space['state'].shape}") # self.state['state'] shape = (122, 3)
-
+        # print(f"In __init__: self.observation_space['action_mask'] shape = {self.observation_space['action_mask'].shape}") 
+        # print(f"In __init__: self.observation_space['state'] shape = {self.observation_space['state'].shape}")
         self.reset()
 
     def _RESET(self):
@@ -50,13 +49,10 @@ class OCPEnv_1(gym.Env):
         self.demand = self.generate_demand()  # Generate bandwidth and storage demands for each object
         self.current_step = 0  # Initialize current step
 
-
-
         self.state = {
             "action_mask": np.ones((self.n_objects, self.n_nodes)),  # Initialize valid actions for each object
-            "avail_actions": np.ones(self.n_nodes),  # Available actions
             "state": np.vstack([
-                np.zeros((self.n_nodes + self.n_objects, 3)),  # Initialize state for each proxy node
+                np.zeros((self.n_nodes, 3)),  # Initialize state for each proxy node
                 self.demand[self.current_step]])  # Add demand for the current step
         }
         self.assignment = {}  # Record actions taken at each step
@@ -65,7 +61,9 @@ class OCPEnv_1(gym.Env):
         # for debugging
         # print(f"self.n_nodes = {self.n_nodes}") # self.n_nodes = 50
         # print(f"self.demand[self.current_step].shape = {self.demand[self.current_step].shape}") # self.demand[self.current_step].shape = (72, 3)
-        print(f"In __RESET: self.state['state'] shape = {self.state['state'].shape}") # After reset(): self.state['state'] shape = (122, 3)
+
+        # print(f"In __RESET: self.state['action_mask'] shape = {self.state['action_mask'].shape}") 
+        # print(f"In __RESET: self.state['state'] shape = {self.state['state'].shape}") 
 
         return self.state, {}
     
@@ -136,27 +134,68 @@ class OCPEnv_1(gym.Env):
     def valid_action_mask(self):
         # Return the valid action mask for each object at the current state
         return self.proxy_validity_mask
-
+    
     def generate_demand(self):
+        return self.generate_demand_normal()
+
+    def generate_demand_normal(self):
+        # Generate demand of video objects' bandwidth and storage 
+        # Not Proxy nodes!! => bandwitdth and storage = 1
+        # 
         # Number of steps per day (e.g., 72 assessments throughout the day)
         n = self.step_limit  # Total steps representing assessments in a day
         
-        # Probability distribution and categories for storage demand
+        # Storage demand from normal distribution
+        storage_demand = np.random.normal(loc=0.5, scale=0.1, size=(self.n_objects, n))
+        storage_demand = np.clip(storage_demand, 0, 1)  # Ensure demand is within 0 to 1
+
+        # Bandwidth demand from normal distribution
+        bandwidth_demand = np.random.normal(loc=0.5, scale=0.1, size=(self.n_objects, n))
+        bandwidth_demand = np.clip(bandwidth_demand, 0, 1)  # Ensure demand is within 0 to 1
+        
+        # Combine time ratio, bandwidth, and storage demand for each object, resulting in (self.n_objects, n, 3)
+        demand = np.array([
+            np.column_stack([np.arange(n) / n, bandwidth_demand[i], storage_demand[i]])
+            # time ratio, bandwidth, and storage demand
+            for i in range(self.n_objects)
+        ])
+
+        # Reshape demand to ensure correct shape for each step (self.n_objects, 3) during each step
+        demand = demand.transpose((1, 0, 2))  # Shape will be (n, self.n_objects, 3)
+        
+        return demand
+    
+    def generate_demand_probs(self):
+        # Generate demand of video objects' bandwidth and storage 
+        # Not Proxy nodes!! => bandwitdth and storage = 1
+        # 
+        # Number of steps per day (e.g., 72 assessments throughout the day)
+        n = self.step_limit  # Total steps representing assessments in a day
+        
+        # Define probabilities and bins for storage demand
         storage_probs = np.array([0.12, 0.165, 0.328, 0.287, 0.064, 0.036])
         storage_bins = np.array([0.1, 0.2, 0.4, 0.6, 0.8, 1.0])
 
-        # Generate bandwidth demand using a normal distribution, clipped to 0-1 range
-        bandwidth_demand = np.random.normal(loc=0.5, scale=0.1, size=(self.n_objects, n))
-        bandwidth_demand = np.clip(bandwidth_demand, 0, 1)  # Ensure demand is within 0 to 1
+        # Define probabilities and bins for bandwidth demand
+        bandwidth_probs = np.array([0.15, 0.2, 0.3, 0.25, 0.1])
+        bandwidth_bins = np.array([0.1, 0.3, 0.5, 0.7, 0.9])
 
-        # Sample storage demand for each video object from specified bins
+        # Generate storage demand using predefined bins and probabilities
         storage_demand = np.random.choice(storage_bins, p=storage_probs, size=(self.n_objects, n))
 
-        # Combine time ratio, bandwidth, and storage demand for each object, resulting in (72, 3) for each object
-        return np.array([
+        # Generate bandwidth demand using predefined bins and probabilities
+        bandwidth_demand = np.random.choice(bandwidth_bins, p=bandwidth_probs, size=(self.n_objects, n))
+        # Combine time ratio, bandwidth, and storage demand for each object, resulting in (self.n_objects, n, 3)
+        demand = np.array([
             np.column_stack([np.arange(n) / n, bandwidth_demand[i], storage_demand[i]])
             for i in range(self.n_objects)
         ])
+
+        # Reshape demand to ensure correct shape for each step (self.n_objects, 3) during each step
+        demand = demand.transpose((1, 0, 2))  # Shape will be (n, self.n_objects, 3)
+        
+        return demand
+
     
     def generate_demand_zipf(self):
         # Number of steps per day (e.g., 72 assessments throughout the day)

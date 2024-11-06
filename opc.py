@@ -24,8 +24,12 @@ class OCPEnv_1(gym.Env):
         self.mask = True  # Whether to use a mask to filter valid actions
 
         # Action space now allows each object to be partially assigned to multiple nodes (binary choices)
-        self.action_space = spaces.MultiBinary(self.n_objects * self.n_nodes)  # Each entry represents a binary choice for each object-node pair
-        
+        self.action_space = gym.spaces.MultiDiscrete([50] * 100)
+
+        # action_space's size = 5000
+        # set single dimension
+        # self.action_dims = [self.n_objects * self.n_nodes]  # or simply 5000 if you want to hardcode
+
         # Initialize valid actions for each object
         # set all actions are valiable
         self.proxy_validity_mask = np.ones((self.n_objects, self.n_nodes), dtype=int)
@@ -34,11 +38,14 @@ class OCPEnv_1(gym.Env):
         if self.mask:
             self.observation_space = spaces.Dict({
                 "action_mask": spaces.Box(0, 1, shape=(self.n_objects, self.n_nodes)),  # Mask for each object's valid actions
-                "state": spaces.Box(0, 1, shape=(self.n_nodes + self.n_objects, 3))  # Node states + object states
+                "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3)),  # State of each proxy node
+                "video_state": spaces.Box(0, 1, shape=(self.n_objects, 3))  # State of each video object
             })
         else:
-            self.observation_space = spaces.Box(0, 1, shape=(self.n_nodes + self.n_objects, 3))
-        
+            self.observation_space = spaces.Dict({
+                "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3)),
+                "video_state": spaces.Box(0, 1, shape=(self.n_objects, 3))
+            })
         # for debugging
         # print(f"In __init__: self.observation_space['action_mask'] shape = {self.observation_space['action_mask'].shape}") 
         # print(f"In __init__: self.observation_space['state'] shape = {self.observation_space['state'].shape}")
@@ -51,13 +58,16 @@ class OCPEnv_1(gym.Env):
 
         self.state = {
             "action_mask": np.ones((self.n_objects, self.n_nodes)),  # Initialize valid actions for each object
-            "state": np.vstack([
-                np.zeros((self.n_nodes, 3)),  # Initialize state for each proxy node
-                self.demand[self.current_step]])  # Add demand for the current step
+            "proxy_state": np.zeros((self.n_nodes, 3)),  # Initialize state for each proxy node
+            "video_state": self.demand[self.current_step]  # Demand for the current step for each video object
         }
         self.assignment = {}  # Record actions taken at each step
+       
         self.proxy_validity_mask = np.ones((self.n_objects, self.n_nodes), dtype=int)  # Initialize valid actions for all objects
-        
+        # different between state's action_mask and proxy_validity_mask
+        # action_mask => matching information of each steps
+        # proxy_validity_mask => eternal matching constraint
+
         # for debugging
         # print(f"self.n_nodes = {self.n_nodes}") # self.n_nodes = 50
         # print(f"self.demand[self.current_step].shape = {self.demand[self.current_step].shape}") # self.demand[self.current_step].shape = (72, 3)
@@ -68,53 +78,69 @@ class OCPEnv_1(gym.Env):
         return self.state, {}
     
     def _STEP(self, actions):
-        # Expecting a MultiBinary array for actions, each entry representing an object-node pair
         done = False
         truncated = False
-        node_state = self.state["state"][:self.n_nodes]  # Extract node state
-        object_demand = self.state["state"][self.n_nodes:]  # Extract demand of objects
+        node_state = self.state["proxy_state"]  # Extract proxy node state
+        object_demand = self.state["video_state"]  # Extract demand of video objects for the current step
         
-        # Reshape actions to (n_objects, n_nodes) to map each object-node pair
-        actions = actions.reshape(self.n_objects, self.n_nodes)
+        # for debugging
+        # print(f"self.action_mask.shape = {self.state['action_mask'].shape}")
+        # print(f"self.video_state.shape = {self.state['proxy_state'].shape}")
+        # print(f"self.proxy_state.shape = {self.state['proxy_state'].shape}")
+        # print(f"time ratio (step / step_limit), bandwidth, and storage demand")
+        # print(f"self.video_state = {self.state['video_state']}")
+        
+        # Initialize reward
+        reward = 0
 
         # Iterate over each object and check assignment across multiple nodes
-        for obj_idx, obj_actions in enumerate(actions):
+        for obj_idx, node_idx  in enumerate(actions):
             demand = object_demand[obj_idx, 1:]  # Get bandwidth and storage demands for the object
-
+            # bandwidth & storage
             # Calculate the total demand each node would receive based on the current object's allocation
-            for node_idx, assign in enumerate(obj_actions):
-                if assign == 1:  # Only allocate if action is 1 for that object-node pair
-                    if all(node_state[node_idx, 1:] + demand <= 1 + self.tol):  # Check if demand fits within node's capacity
-                        # Allocate demand to the node
-                        if node_state[node_idx, 0] == 0:
-                            node_state[node_idx, 0] = 1  # Activate the node if inactive
-                        node_state[node_idx, 1:] += demand  # Add demand to node
-                        reward = np.sum(node_state[:, 0] * (node_state[:, 1:].sum(axis=1) - 2))  # Calculate reward
-                        self.assignment[self.current_step] = (obj_idx, node_idx)  # Record assignment
-                    else:
-                        reward = -1000  # Penalty if allocation is not possible
-                        done = True
-                        break
+            if all(node_state[node_idx, 1:] + demand <= 1 + self.tol):
+                # Allocate demand to the node
+                if node_state[node_idx, 0] == 0:
+                    node_state[node_idx, 0] = 1  # Activate the node if inactive
+                node_state[node_idx, 1:] += demand  # Add demand to node
 
+                # Calculate reward
+                reward += np.sum(node_state[:, 0] * (node_state[:, 1:].sum(axis=1) - 2))
+
+                # Record assignment
+                self.assignment[self.current_step] = (obj_idx, node_idx)
+            else:
+                reward -= 1000  # Penalty if allocation is not possible
+                done = True
+                break
+
+        # Increment step and check if the episode is done
         self.current_step += 1
         if self.current_step >= self.step_limit:
             done = True  # End the episode if the step limit is exceeded
+
+        # Update the state with the new node_state
         self.update_state(node_state)
+
         return self.state, reward, done, truncated, {}
-    
+
     def update_state(self, node_state):
-        # Update node state and reset action masks for each object
+        # Update proxy node state and reset action masks for each object
         step = self.current_step if self.current_step < self.step_limit else self.step_limit - 1
-        data_center = np.vstack([node_state, self.demand[step]])
-        data_center = np.where(data_center > 1, 1, data_center)  # Clip values exceeding capacity to maximum
-        self.state["state"] = data_center
+
+        # Update proxy and video states in the main state
+        self.state["proxy_state"] = np.where(node_state > 1, 1, node_state)  # Clip node state to maximum capacity
+        self.state["video_state"] = self.demand[step]  # Get demand for each object for the current step
 
         # Create valid action masks for each object at the current step
-        for obj_idx, demand in enumerate(self.demand[self.current_step]):
-            action_mask = (node_state[:, 1:] + demand[1:]) <= 1  # Compare demand of each object with proxy nodes
+        for obj_idx, demand in enumerate(self.demand[step]):
+            action_mask = (node_state[:, 1:] + demand[1:]) <= 1  # Check demand with node capacity
             self.proxy_validity_mask[obj_idx] = (action_mask.sum(axis=1) == 2).astype(int)  # Mark valid nodes as 1
-        
+
+        # Update action_mask in state
         self.state["action_mask"] = self.proxy_validity_mask
+
+ 
 
     def sample_action(self):
         # Sample a random action for each object-node pair
@@ -133,6 +159,7 @@ class OCPEnv_1(gym.Env):
 
     def valid_action_mask(self):
         # Return the valid action mask for each object at the current state
+        ## 여기 수정 필요 ##
         return self.proxy_validity_mask
     
     def generate_demand(self):

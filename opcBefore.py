@@ -8,38 +8,64 @@ import inspect
 class OCPEnv_1(gym.Env):
     def __init__(self, *args, **kwargs):
 
-        self.n_nodes = 50
-        self.n_objects = 100
+        # Initialize environment settings based on input configuration
+        self.n_nodes = kwargs.get('n_nodes', 50)
+        self.n_objects = kwargs.get('n_object', 100)
         assign_env_config(self, kwargs)
+        # print(f"n_nodes = {self.n_nodes}")
 
         # Single proxy 
         self.cache_capacity = 1  # Cache capacity per proxy
+        # self.bandwidth_capacity = 1  # Bandwidth capacity per proxy
+        # self.n_nodes = 50  # Number of proxy nodes
+
+        # Video object
+        # self.n_objects = 100  # Number of video objects based on the reference paper
 
         # Environment
+        # self.t_interval = 20  # Time interval
         self.tol = 1e-5  # Tolerance for numerical stability
-        self.step_limit = self.n_objects  # Total steps per day based on time intervals
+        self.step_limit =int(100)  # Total steps per day based on time intervals
         self.seed = 1234  # Initialize random seed
         self.mask = True  # Whether to use a mask to filter valid actions
 
-
-        self.action_space = gym.spaces.MultiBinary(self.n_nodes)
+        # Action space now allows each object to be partially assigned to multiple nodes (binary choices)
+        # self.action_space = gym.spaces.Discrete(self.n_nodes) # environment's return value # 50
+        self.action_space = gym.spaces.MultiDiscrete([50] * 100)
         
+        # suppose that nodes and objectes are matched one by one
+        # self.action_space = gym.spaces.MultiBinary(100 * 50) 
 
+        # action_space => each proxies has 
+
+        # action_space's size = 5000
+        # set single dimension
+        # self.action_dims = [self.n_objects * self.n_nodes]  # or simply 5000 if you want to hardcode
+
+        # Initialize valid actions for each object
+        # set all actions are valiable
         self.proxy_validity_mask = np.ones((self.n_objects, self.n_nodes), dtype=int)
+        # eternal mask => later change
         
         # Observation space includes action masks, available actions, and state (proxy status + demand)
         if self.mask:
             self.observation_space = spaces.Dict({
-                "action_mask": spaces.Box(0, 1, shape=(self.n_nodes,)),  
-                "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3)), 
-                # "video_state": spaces.Box(0, 1, shape=(self.n_objects, 3)),  
+                "action_mask": spaces.Box(0, 1, shape=(self.n_objects, self.n_nodes)),  # Mask for each object's valid actions
+                "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3)),  # State of each proxy node
+                "video_state": spaces.Box(0, 1, shape=(self.n_objects, 3)),  # State of each video object
+                "current_step": spaces.Discrete(self.n_objects),
+                # "assingment_state": spaces.
             })
         else:
             self.observation_space = spaces.Dict({
                 "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3)),
-                # "video_state": spaces.Box(0, 1, shape=(self.n_objects, 3)),
-            })
+                "video_state": spaces.Box(0, 1, shape=(self.n_objects, 3)),
+                "current_step": spaces.Discrete(self.n_objects)
 
+            })
+        # for debugging
+        # print(f"In __init__: self.observation_space['action_mask'] shape = {self.observation_space['action_mask'].shape}") 
+        # print(f"In __init__: self.observation_space['state'] shape = {self.observation_space['state'].shape}")
         self.reset()
 
     def _RESET(self):
@@ -55,17 +81,28 @@ class OCPEnv_1(gym.Env):
         }
         self.assignment = {}  # Record actions taken at each step
        
+        # self.proxy_validity_mask = np.ones((self.n_objects, self.n_nodes), dtype=int)  # Initialize valid actions for all objects
+        # different between state's action_mask and proxy_validity_mask
+        # action_mask => matching information of each steps
+        # proxy_validity_mask => eternal matching constraint
+
+        # for debugging
+        # print(f"self.n_nodes = {self.n_nodes}") # self.n_nodes = 50
+        # print(f"self.demand[self.current_step].shape = {self.demand[self.current_step].shape}") # self.demand[self.current_step].shape = (72, 3)
+
+        # print(f"In __RESET: self.state['action_mask'] shape = {self.state['action_mask'].shape}") 
+        # print(f"In __RESET: self.state['state'] shape = {self.state['state'].shape}") 
 
         return self.state, {'action_mask': self.state["action_mask"]}
 
 
     def step(self, action):
-        # caller_frame = inspect.stack()[1]
-        # caller_file_path = caller_frame.filename
-        # caller_function_name = caller_frame.function
+        caller_frame = inspect.stack()[1]
+        caller_file_path = caller_frame.filename
+        caller_function_name = caller_frame.function
     
-        # print(f"Caller file path: {caller_file_path}")
-        # print(f"Caller function name: {caller_function_name}")
+        print(f"Caller file path: {caller_file_path}")
+        print(f"Caller function name: {caller_function_name}")
         # Main step function called externally
         # print(f"step start")
         print(f"================ step start ================")
@@ -181,7 +218,10 @@ class OCPEnv_1(gym.Env):
         return self.generate_demand_normal()
 
     def generate_demand_normal(self):
-
+        # Generate demand of video objects' bandwidth and storage 
+        # Not Proxy nodes!! => bandwitdth and storage = 1
+        # 
+        # Number of steps per day (e.g., 72 assessments throughout the day)
         n = self.step_limit  # Total steps representing assessments in a day
         
         # Storage demand from normal distribution

@@ -7,7 +7,7 @@ import inspect
 
 class OCPEnv_1(gym.Env):
     def __init__(self, *args, **kwargs):
-
+        # test code
         self.n_nodes = 50
         self.n_objects = 100
         assign_env_config(self, kwargs)

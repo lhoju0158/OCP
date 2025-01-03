@@ -36,12 +36,12 @@ class OCPEnv_1(gym.Env):
             self.observation_space = spaces.Dict({
                 "action_mask": spaces.Box(0, 1, shape=(self.n_nodes,)),  
                 "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3)), # 현재 할당된 상태
-                "current_video_state": spaces.Box(0,1,shape=(3))
+                "current_video_state": spaces.Box(0,1,shape=(3, 1))
             })
         else:
             self.observation_space = spaces.Dict({
                 "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3)),
-                "current_video_state": spaces.Box(0,1,shape=(3))
+                "current_video_state": spaces.Box(0,1,shape=(3, 1))
             })
 
         self.reset()
@@ -96,13 +96,14 @@ class OCPEnv_1(gym.Env):
         # => 그냥 temp_reward로 하고 true이면 더하지 말기
 
         is_invalidable = False
-        temp_reward = 0
+        # 여기서 기본적으로 성공 보상을 10 정도로 setting 하거나 아니면
+        # 그냥 0으로 세팅해서 음수의 보상을 하던가
         
         # target_proxy에 대해서 bandwidth와 storage 할당하기
         for single_proxy in target_proxy:
-            proxy_activate = self.state["proxy_state"][single_proxy,0]
-            proxy_bandwidth = self.state["proxy_state"][single_proxy,1]
-            proxy_storage = self.state["proxy_state"][single_proxy,2]
+            proxy_activate = self.state["proxy_state"][single_proxy, 0]
+            proxy_bandwidth = self.state["proxy_state"][single_proxy, 1]
+            proxy_storage = self.state["proxy_state"][single_proxy, 2]
 
             ## for debug
             print(f"current single_proxy = {single_proxy}")
@@ -111,7 +112,7 @@ class OCPEnv_1(gym.Env):
             print(f"proxy_storage = {proxy_storage}")
 
             # 불가능하다면 is_invalidable을 True로 바꾸기
-            if 1 + self.tol <current_video_bandwidth + proxy_bandwidth or 1 + self.tol <current_video_storage + proxy_storage:
+            if 1 + self.tol < current_video_bandwidth + proxy_bandwidth or 1 + self.tol <current_video_storage + proxy_storage:
                 is_invalidable = True
                 print(f"current single_proxy {single_proxy} is not invalidable")
                 break
@@ -135,9 +136,12 @@ class OCPEnv_1(gym.Env):
             reward = -1000
             done = True
         else:
-            # 가능한 action만 선택한 경우
-            # temp_reward 더하기
-            reward = temp_reward
+            # 가능한 action만 선택한 경우 => 성공적으로 이번 step이 종료됨
+            # 현재 상황을 기반으로 전체적인 reward를 계산하는 것이 마땅함
+            ### 여기서 reward 전체적으로 계산하기!!
+            ### 
+
+            reward
             # done은 아직 그래도 false -> 한 에피소드가 끝낼 경우만 done = True
 
 
@@ -153,45 +157,6 @@ class OCPEnv_1(gym.Env):
         return self.state, reward, done, truncated, {'action_mask': self.state["action_mask"]}
         # obs, reward, done, truncated, info = env.step(action)
         # step 함수에 기대되는 반환값
-
-        # # Iterate over each object and check assignment across multiple nodes
-        # for obj_idx, node_idx  in enumerate(action):
-        #     demand = object_demand[obj_idx, 1:]  # Get bandwidth and storage demands for the object
-        #     # bandwidth & storage
-        #     # Calculate the total demand each node would receive based on the current object's allocation
-        #     if all(node_state[node_idx, 1:] + demand <= 1 + self.tol):
-        #         # Allocate demand to the node
-        #         # bandwidth & storage
-        #         if node_state[node_idx, 0] == 0: 
-        #             node_state[node_idx, 0] = 1  # Activate the node if inactive
-        #         node_state[node_idx, 1:] += demand  # Add demand to node
-
-        #         # Calculate reward
-        #         reward += np.sum(node_state[:, 0] * (node_state[:, 1:].sum(axis=1) - 2))
-
-        #         # Record assignment
-        #         self.assignment[self.current_step] = (obj_idx, node_idx)
-        #         self.update_state(node_state)
-
-        #     else:
-        #         reward -= 1000  # Penalty if allocation is not possible
-        #         done = True
-        #         print(f"done")
-
-        #         break
-
-        # Increment step and check if the episode is done
-        # self.current_step += 1
-        # if self.current_step >= self.step_limit:
-        #     print(f"=========================== SUCCESS! ===========================")
-        #     done = True  # End the episode if the step limit is exceeded
-
-        # Update the state with the new node_state
-        # self.update_state(node_state)
-        # return self.state, reward, done, truncated, {'action_mask': self.state["action_mask"]}
-        # obs, reward, done, truncated, info = env.step(action)
-        # step 함수에 기대되는 반환값
-
 
     def update_state(self, node_state):
         # Update proxy node state and reset action masks for each object

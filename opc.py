@@ -23,7 +23,7 @@ class OCPEnv_1(gym.Env):
         self.mask = True  
 
         self.action_space = gym.spaces.MultiBinary(self.n_nodes)
-        # for debuging
+        ## for debuging
         # print(f"Action Space Details: {self.action_space}")
         # print(f"Action Space Type: {type(self.action_space)}")
         # print(f"Action Space Size: {self.action_space.n}")
@@ -34,14 +34,15 @@ class OCPEnv_1(gym.Env):
         self.proxy_validity_mask = np.ones(self.n_nodes)
         if self.mask:
             self.observation_space = spaces.Dict({
-                "action_mask": spaces.Box(0, 1, shape=(self.n_nodes,)),  
-                "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3)), # 현재 할당된 상태
-                "current_video_state": spaces.Box(0,1,shape=(3, 1))
+                # 여기서 action_mask를 2로 늘려야 기대하는 값과 동일해진다
+                "action_mask": spaces.Box(0, 1, shape=(self.n_nodes * 2,), dtype=bool),
+                "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3), dtype=np.float32), # 현재 할당된 상태
+                "current_video_state": spaces.Box(0,1,shape=(3, 1), dtype=np.float32)
             })
         else:
             self.observation_space = spaces.Dict({
-                "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3)),
-                "current_video_state": spaces.Box(0,1,shape=(3, 1))
+                "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3), dtype=np.float32),
+                "current_video_state": spaces.Box(0,1,shape=(3, 1), dtype=np.float32)
             })
 
         self.reset()
@@ -51,10 +52,11 @@ class OCPEnv_1(gym.Env):
         self.current_step = 0  
 
         self.state = {
-            "action_mask": np.ones(self.n_nodes), 
+            # "action_mask": np.ones(self.n_nodes), 
             "proxy_state": np.zeros((self.n_nodes, 3)),  
             "current_video_state": np.vstack(self.demand[self.current_step])
         }
+        self.state["action_mask"] = self.valid_action_mask()
         self.assignment = {}  # Record actions taken at each step
 
         return self.state, {'action_mask': self.state["action_mask"]}
@@ -174,15 +176,41 @@ class OCPEnv_1(gym.Env):
         # Update action_mask in state
         self.state["action_mask"] = action_mask
 
-    def valid_actions(self):
-        # Return the valid action mask for each object at the current state
-        # 여기서 action_mask와 proxy_validity_mask 모두 확인해야 한다
-        # proxy_validity_mask는 영구적인 mask이기 때문에 초기에만 변화하고 이후 변하진 않는다
-        print(f"valid_actions is called")
+    def valid_action_mask(self):
+        action_mask = np.zeros((self.n_nodes, 2), dtype=bool)
 
-        combined_mask = self.proxy_validity_mask * self.state["action_mask"]
+        for i in range(self.n_nodes):
+            proxy_bandwidth = self.state["proxy_state"][i, 1]
+            proxy_storage = self.state["proxy_state"][i, 2]
+            current_video_bandwidth = self.state["current_video_state"][1]
+            current_video_storage = self.state["current_video_state"][2]
 
-        return combined_mask
+            can_assign = (
+                proxy_bandwidth + current_video_bandwidth <= self.cache_capacity + self.tol and
+                proxy_storage + current_video_storage <= self.cache_capacity + self.tol
+            )
+
+            if can_assign:
+                action_mask[i] = [True, True]
+            else:
+                action_mask[i] = [True, False]
+
+        return action_mask.flatten()
+
+
+
+
+
+    # def valid_actions(self):
+    #     # Return the valid action mask for each object at the current state
+    #     # 여기서 action_mask와 proxy_validity_mask 모두 확인해야 한다
+    #     # proxy_validity_mask는 영구적인 mask이기 때문에 초기에만 변화하고 이후 변하진 않는다
+    #     print(f"valid_actions is called")
+
+    #     # combined_mask = self.proxy_validity_mask * self.state["action_mask"]
+    #     combined_mask = self.state["action_mask"]
+
+    #     return combined_mask
  
 
     def sample_action(self):

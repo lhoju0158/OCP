@@ -8,9 +8,7 @@ import inspect
 class OCPEnv_1(gym.Env):
     def __init__(self, *args, **kwargs):
         # proxy의 bandwidth, storage capacity = 1
-
         self.n_nodes = 50 # proxy의 개수
-
         assign_env_config(self, kwargs)
         self.cache_capacity = 1  # Cache capacity per proxy
         self.t_interval = 20
@@ -23,19 +21,17 @@ class OCPEnv_1(gym.Env):
         self.mask = True  
 
         self.action_space = gym.spaces.MultiBinary(self.n_nodes)
-        ## for debuging
+        # ## for debuging
         # print(f"Action Space Details: {self.action_space}")
         # print(f"Action Space Type: {type(self.action_space)}")
         # print(f"Action Space Size: {self.action_space.n}")
         # print(f"Action Space Sample: {self.action_space.sample()}")
         # exit(0)
 
-
-        self.proxy_validity_mask = np.ones(self.n_nodes)
+        self.proxy_validity_mask = np.ones(self.n_nodes) # => 영구적인 mask
         if self.mask:
             self.observation_space = spaces.Dict({
-                # 여기서 action_mask를 2로 늘려야 기대하는 값과 동일해진다
-                "action_mask": spaces.Box(0, 1, shape=(self.n_nodes * 2,), dtype=bool),
+                # "action_mask": spaces.Box(0, 1, shape=(self.n_nodes,), dtype=bool),
                 "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3), dtype=np.float32), # 현재 할당된 상태
                 "current_video_state": spaces.Box(0,1,shape=(3, 1), dtype=np.float32)
             })
@@ -52,45 +48,45 @@ class OCPEnv_1(gym.Env):
         self.current_step = 0  
 
         self.state = {
-            # "action_mask": np.ones(self.n_nodes), 
             "proxy_state": np.zeros((self.n_nodes, 3)),  
-            "current_video_state": np.vstack(self.demand[self.current_step])
+            "current_video_state": np.vstack(self.demand[self.current_step]),
+            # "action_mask": np.zeros((self.n_nodes))
         }
-        self.state["action_mask"] = self.valid_action_mask()
-        self.assignment = {}  # Record actions taken at each step
-
-        return self.state, {'action_mask': self.state["action_mask"]}
+        self.assignment = {} # 각 step의 할당 과정 저장 배열
+        return self.state, {} # return 값 => info도 요구한다
 
 
-    def step(self, action):
-        print(f"================ step start ================")
-        return self._STEP(action)
+
+
     
     def _STEP(self, action):
         # 여기서 action의 결과는 action_space가 multibinary이니깐 0과 1로 이루어진 50개의 숫자
         # 여기서 50개의 숫자 중 1인 곳에 현재 step에 해당하는 demand인 bandwidth과 storage를 가진 video를 할당한다
-        print(f"Now agent's action = {action}")
+        # print(f"Now agent's action = {action}")
         done = False
         truncated = False
         reward = 0
-
         current_video_bandwidth = self.state["current_video_state"][1]
         current_video_storage = self.state["current_video_state"][2]
+        # print(f"current_video_bandwidth = {current_video_bandwidth}")
+        # print(f"current_video_storage = {current_video_storage}")
         
         # 일단 몇번째 proxy에 복사해야하는지 알아내기
-
-        target_proxy = np.where(action == 1)  # action에서 값이 1인 index의 집합
-        print(f"target_proxy = {target_proxy}")
+        target_proxy = np.where(action == 1)[0]  # action에서 값이 1인 index의 집합
+        print(f"target_proxy = {target_proxy}") # 에이전트의 결과
 
         # action_space의 결과 1이면 해당 proxy에 copy하고 0이면 그냥 두기
+
+        # 오류 확인
         if action.ndim != 1 or len(action) != self.n_nodes or not set(action).issubset({0, 1}):
             # action이 1차원인지 / 50개인지 / 0과 1만 원소로 가지고 있는지를 확인
             raise ValueError("Invalid action: {}".format(action))
         
         # 모두 0으로 action하라고 하면 안된다 -> 이것도 reward 낮게 반환하기
-        if np.size(target_proxy) == 0:
+        if len(target_proxy) == 0:
             reward = -1000
             done = True
+            return self.state, reward, done, truncated, {'action_mask': self.valid_action_mask}
         
         # 여기서 하나라도 할당이 안되는게 있으면 바로 reward 낮추고 바로 done하기
         # 이거 다음 for 구문에 넣으면 안되는 이유: 밖에 있어야 현재 agent가 내린 action_space 전체에 대한 판단이 가능하다
@@ -107,21 +103,21 @@ class OCPEnv_1(gym.Env):
             proxy_bandwidth = self.state["proxy_state"][single_proxy, 1]
             proxy_storage = self.state["proxy_state"][single_proxy, 2]
 
-            ## for debug
-            print(f"current single_proxy = {single_proxy}")
-            print(f"proxy_activate = {proxy_activate}")
-            print(f"proxy_bandwidth = {proxy_bandwidth}")
-            print(f"proxy_storage = {proxy_storage}")
+            # ## for debug
+            # print(f"===== Before assignment ===== current single_proxy = {single_proxy}")
+            # print(f"proxy_activate = {proxy_activate}")
+            # print(f"proxy_bandwidth = {proxy_bandwidth}")
+            # print(f"proxy_storage = {proxy_storage}")
 
             # 불가능하다면 is_invalidable을 True로 바꾸기
-            if 1 + self.tol < current_video_bandwidth + proxy_bandwidth or 1 + self.tol <current_video_storage + proxy_storage:
+            if (1 + self.tol < current_video_bandwidth + proxy_bandwidth) or (1 + self.tol <current_video_storage + proxy_storage) :
                 is_invalidable = True
                 print(f"current single_proxy {single_proxy} is not invalidable")
                 break
 
             # 활성화 하기
             if proxy_activate == 0:
-                proxy_activate = 1
+                proxy_activate = 1.0
             
             # 이제 요구대로 할당하기
             proxy_bandwidth+=current_video_bandwidth
@@ -131,6 +127,11 @@ class OCPEnv_1(gym.Env):
             self.state["proxy_state"][single_proxy,0] = proxy_activate
             self.state["proxy_state"][single_proxy,1] = proxy_bandwidth
             self.state["proxy_state"][single_proxy,2] = proxy_storage
+
+            # print(f"===== After assignment ===== current single_proxy = {single_proxy}")
+            # print(self.state["proxy_state"][single_proxy,0])
+            # print(self.state["proxy_state"][single_proxy,1])
+            # print(self.state["proxy_state"][single_proxy,2])
 
         # 이거 끝나고 더하기
         if is_invalidable:
@@ -143,9 +144,8 @@ class OCPEnv_1(gym.Env):
             ### 여기서 reward 전체적으로 계산하기!!
             ### 
 
-            reward
+            reward+=10 # 일단 대강 적기
             # done은 아직 그래도 false -> 한 에피소드가 끝낼 경우만 done = True
-
 
         # 성공적으로 72회를 넘어섰을 때 -> 모든 video obj가 성공적으로 끝냄
         if self.current_step >= self.step_limit:
@@ -156,9 +156,12 @@ class OCPEnv_1(gym.Env):
         # return 직전에 상태 update하기
         #### 여기에 ####
 
-        return self.state, reward, done, truncated, {'action_mask': self.state["action_mask"]}
-        # obs, reward, done, truncated, info = env.step(action)
-        # step 함수에 기대되는 반환값
+        # print(f"in _STEP, self.state = {self.state}")
+        # exit(0)
+
+        # return self.state, reward, done, truncated, {'action_mask': self.state["action_mask"]}
+        return self.state, reward, done, truncated, {'action_mask': self.valid_action_mask} # 여기 마지막 값도 info 필요
+
 
     def update_state(self, node_state):
         # Update proxy node state and reset action masks for each object
@@ -177,6 +180,7 @@ class OCPEnv_1(gym.Env):
         self.state["action_mask"] = action_mask
 
     def valid_action_mask(self):
+        # 2차원 배열로 초기화
         action_mask = np.zeros((self.n_nodes, 2), dtype=bool)
 
         for i in range(self.n_nodes):
@@ -185,43 +189,20 @@ class OCPEnv_1(gym.Env):
             current_video_bandwidth = self.state["current_video_state"][1]
             current_video_storage = self.state["current_video_state"][2]
 
+            # 노드가 현재 비디오를 수용할 수 있는지 확인
             can_assign = (
                 proxy_bandwidth + current_video_bandwidth <= self.cache_capacity + self.tol and
                 proxy_storage + current_video_storage <= self.cache_capacity + self.tol
             )
 
-            if can_assign:
-                action_mask[i] = [True, True]
-            else:
-                action_mask[i] = [True, False]
+            # 액션 0과 1에 대한 마스킹 설정
+            action_mask[i, 0] =[True]
+            action_mask[i, 1] = can_assign
+            # action_mask[i] = [True, can_assign]
 
         return action_mask.flatten()
 
 
-
-
-
-    # def valid_actions(self):
-    #     # Return the valid action mask for each object at the current state
-    #     # 여기서 action_mask와 proxy_validity_mask 모두 확인해야 한다
-    #     # proxy_validity_mask는 영구적인 mask이기 때문에 초기에만 변화하고 이후 변하진 않는다
-    #     print(f"valid_actions is called")
-
-    #     # combined_mask = self.proxy_validity_mask * self.state["action_mask"]
-    #     combined_mask = self.state["action_mask"]
-
-    #     return combined_mask
- 
-
-    def sample_action(self):
-        return self.action_space.sample()
-
-
-    def reset(self, **kwargs):
-        return self._RESET()
-    
-    def generate_demand(self):
-        return self.generate_demand_normal()
 
     def generate_demand_normal(self):
         n = self.step_limit  # Total steps representing assessments in a day
@@ -244,10 +225,18 @@ class OCPEnv_1(gym.Env):
         return demand
     
 
+    def sample_action(self):
+        return self.action_space.sample()
 
-
-
-
+    def reset(self, **kwargs):
+        return self._RESET()
+    
+    def generate_demand(self):
+        return self.generate_demand_normal()
+    
+    def step(self, action):
+        print(f"================ step start ================")
+        return self._STEP(action)
 
 
 

@@ -28,17 +28,17 @@ class OCPEnv_1(gym.Env):
         # print(f"Action Space Sample: {self.action_space.sample()}")
         # exit(0)
 
-        self.proxy_validity_mask = np.ones(self.n_nodes) # => 영구적인 mask
+        # self.proxy_validity_mask = np.ones(self.n_nodes) # => 영구적인 mask
         if self.mask:
             self.observation_space = spaces.Dict({
                 # "action_mask": spaces.Box(0, 1, shape=(self.n_nodes,), dtype=bool),
                 "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3), dtype=np.float32), # 현재 할당된 상태
-                "current_video_state": spaces.Box(0,1,shape=(3, 1), dtype=np.float32)
+                "current_video_state": spaces.Box(0,1,shape=(3,), dtype=np.float32)
             })
         else:
             self.observation_space = spaces.Dict({
                 "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3), dtype=np.float32),
-                "current_video_state": spaces.Box(0,1,shape=(3, 1), dtype=np.float32)
+                "current_video_state": spaces.Box(0,1,shape=(3, ), dtype=np.float32)
             })
 
         self.reset()
@@ -48,11 +48,13 @@ class OCPEnv_1(gym.Env):
         self.current_step = 0  
 
         self.state = {
-            "proxy_state": np.zeros((self.n_nodes, 3)),  
-            "current_video_state": np.vstack(self.demand[self.current_step]),
+            "proxy_state": np.zeros((self.n_nodes, 3), dtype=np.float32),  
+            "current_video_state": self.demand[self.current_step].flatten(),  # .flatten()을 사용하여 (3,) 형태로 변환
             # "action_mask": np.zeros((self.n_nodes))
         }
         self.assignment = {} # 각 step의 할당 과정 저장 배열
+
+        
         return self.state, {} # return 값 => info도 요구한다
 
 
@@ -73,7 +75,7 @@ class OCPEnv_1(gym.Env):
         
         # 일단 몇번째 proxy에 복사해야하는지 알아내기
         target_proxy = np.where(action == 1)[0]  # action에서 값이 1인 index의 집합
-        print(f"target_proxy = {target_proxy}") # 에이전트의 결과
+        # print(f"target_proxy = {target_proxy}") # 에이전트의 결과
 
         # action_space의 결과 1이면 해당 proxy에 copy하고 0이면 그냥 두기
 
@@ -200,6 +202,10 @@ class OCPEnv_1(gym.Env):
             action_mask[i, 1] = can_assign
             # action_mask[i] = [True, can_assign]
 
+        # 1차원이 맞음 2차원이 맞음??
+
+        
+
         return action_mask.flatten()
 
 
@@ -235,7 +241,7 @@ class OCPEnv_1(gym.Env):
         return self.generate_demand_normal()
     
     def step(self, action):
-        print(f"================ step start ================")
+        # print(f"================ step start ================")
         return self._STEP(action)
 
 

@@ -23,13 +23,9 @@ class OCPEnv_1(gym.Env):
         # self.seed = kwargs.get("seed", 1234) # 기본값으로 나중에 하기  
         self.mask = True  # => 이걸 나중에 masking 여부로 나타내기
 
+        
+        # self.action_space = spaces.Box(0,1,shape=(self.n_nodes,),dtype=np.int32)
         self.action_space = gym.spaces.MultiBinary(self.n_nodes)
-        # ## for debuging
-        # print(f"Action Space Details: {self.action_space}")
-        # print(f"Action Space Type: {type(self.action_space)}")
-        # print(f"Action Space Size: {self.action_space.n}")
-        # print(f"Action Space Sample: {self.action_space.sample()}")
-        # exit(0)
 
         # self.proxy_validity_mask = np.ones(self.n_nodes) # => 영구적인 mask
         if self.mask:
@@ -46,13 +42,9 @@ class OCPEnv_1(gym.Env):
 
         if self.seed == 0:
             np.random.seed(self.seed)
-            print(f"random seed ={self.seed}")
+            print(f"random seed = {self.seed}")
         self.reset()
-
-        # state, info = self.reset()
-        # print("State:", state)
-        # print("Observation space:", self.observation_space)
-
+    
     def _RESET(self):
         self.demand = self.generate_demand()  
         self.current_step = 0  
@@ -84,17 +76,19 @@ class OCPEnv_1(gym.Env):
         # print(f"target_proxy = {target_proxy}") # 에이전트의 결과
 
         # action_space의 결과 1이면 해당 proxy에 copy하고 0이면 그냥 두기
-
+        # print(f"in current step, action = {action}")
         # 오류 확인
         if action.ndim != 1 or len(action) != self.n_nodes or not set(action).issubset({0, 1}):
             # action이 1차원인지 / 50개인지 / 0과 1만 원소로 가지고 있는지를 확인
             raise ValueError("Invalid action: {}".format(action))
-        
+        print(f"target_proxy = {target_proxy}")
         # 모두 0으로 action하라고 하면 안된다 -> 이것도 reward 낮게 반환하기
         if len(target_proxy) == 0:
-            reward = -1000
+            # print(f"target_proxy = {target_proxy}")
+            # reward = -1000               
+            print(f"all target_proxy is 0")
             done = True
-            return self.state, reward, done, truncated, {'action_mask': self.valid_action_mask}
+            # return self.state, reward, done, truncated, {'action_mask': self.valid_action_mask}
         
         # 여기서 하나라도 할당이 안되는게 있으면 바로 reward 낮추고 바로 done하기
         # 이거 다음 for 구문에 넣으면 안되는 이유: 밖에 있어야 현재 agent가 내린 action_space 전체에 대한 판단이 가능하다
@@ -207,9 +201,13 @@ class OCPEnv_1(gym.Env):
                 proxy_bandwidth + current_video_bandwidth <= self.cache_capacity + self.tol and
                 proxy_storage + current_video_storage <= self.cache_capacity + self.tol
             )
+            if can_assign:
+                action_mask[i] = 1
+            else:
+                action_mask[i] = 0
 
             # 액션 0과 1에 대한 마스킹 설정
-            action_mask[i] = can_assign
+            # action_mask[i] = can_assign
         return action_mask    
     
     def valid_action_mask_2(self):

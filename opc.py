@@ -9,6 +9,7 @@ class OCPEnv_1(gym.Env):
     def __init__(self, *args, **kwargs):
         # proxy의 bandwidth, storage capacity = 1
         self.n_nodes = 50 # proxy의 개수
+        self.seed = 0
         assign_env_config(self, kwargs)
         self.cache_capacity = 1  # Cache capacity per proxy
         self.t_interval = 20
@@ -17,8 +18,10 @@ class OCPEnv_1(gym.Env):
 
         # Environment
         self.tol = 1e-5  
-        self.seed = 1234  
-        self.mask = True  
+        # print(f"kwrgs = {kwargs}")
+        # print(f"self.seed = {self.seed}")
+        # self.seed = kwargs.get("seed", 1234) # 기본값으로 나중에 하기  
+        self.mask = True  # => 이걸 나중에 masking 여부로 나타내기
 
         self.action_space = gym.spaces.MultiBinary(self.n_nodes)
         # ## for debuging
@@ -41,7 +44,14 @@ class OCPEnv_1(gym.Env):
                 "current_video_state": spaces.Box(0,1,shape=(3, ), dtype=np.float32)
             })
 
+        if self.seed == 0:
+            np.random.seed(self.seed)
+            print(f"random seed ={self.seed}")
         self.reset()
+
+        # state, info = self.reset()
+        # print("State:", state)
+        # print("Observation space:", self.observation_space)
 
     def _RESET(self):
         self.demand = self.generate_demand()  
@@ -49,17 +59,13 @@ class OCPEnv_1(gym.Env):
 
         self.state = {
             "proxy_state": np.zeros((self.n_nodes, 3), dtype=np.float32),  
-            "current_video_state": self.demand[self.current_step].flatten(),  # .flatten()을 사용하여 (3,) 형태로 변환
+            "current_video_state": self.demand[self.current_step]  # .flatten()을 사용하여 (3,) 형태로 변환
             # "action_mask": np.zeros((self.n_nodes))
         }
         self.assignment = {} # 각 step의 할당 과정 저장 배열
 
         
         return self.state, {} # return 값 => info도 요구한다
-
-
-
-
     
     def _STEP(self, action):
         # 여기서 action의 결과는 action_space가 multibinary이니깐 0과 1로 이루어진 50개의 숫자
@@ -182,6 +188,31 @@ class OCPEnv_1(gym.Env):
         self.state["action_mask"] = action_mask
 
     def valid_action_mask(self):
+        return self.valid_action_mask_2()
+
+    def valid_action_mask_1(self):
+        # 1차원 배열로 초기화 
+        # => RuntimeError: shape '[-1, 100]' is invalid for input of size 50
+        # 2차원 배열을 기대함
+        action_mask = np.zeros((self.n_nodes,), dtype=bool)
+
+        for i in range(self.n_nodes):
+            proxy_bandwidth = self.state["proxy_state"][i, 1]
+            proxy_storage = self.state["proxy_state"][i, 2]
+            current_video_bandwidth = self.state["current_video_state"][1]
+            current_video_storage = self.state["current_video_state"][2]
+
+            # 노드가 현재 비디오를 수용할 수 있는지 확인
+            can_assign = (
+                proxy_bandwidth + current_video_bandwidth <= self.cache_capacity + self.tol and
+                proxy_storage + current_video_storage <= self.cache_capacity + self.tol
+            )
+
+            # 액션 0과 1에 대한 마스킹 설정
+            action_mask[i] = can_assign
+        return action_mask    
+    
+    def valid_action_mask_2(self):
         # 2차원 배열로 초기화
         action_mask = np.zeros((self.n_nodes, 2), dtype=bool)
 
@@ -198,15 +229,13 @@ class OCPEnv_1(gym.Env):
             )
 
             # 액션 0과 1에 대한 마스킹 설정
-            action_mask[i, 0] =[True]
-            action_mask[i, 1] = can_assign
-            # action_mask[i] = [True, can_assign]
-
-        # 1차원이 맞음 2차원이 맞음??
-
-        
+            if can_assign:
+                action_mask[i] = [True, True]
+            else:
+                action_mask[i] = [True, False]
 
         return action_mask.flatten()
+        # return action_mask # 여기 flatten 유무 확인
 
 
 
@@ -242,69 +271,5 @@ class OCPEnv_1(gym.Env):
     
     def step(self, action):
         # print(f"================ step start ================")
+        # print(f"Step method result: {self._STEP(action)}")
         return self._STEP(action)
-
-
-
-
-
-
-
-    ########
-    # 나중에 고치기
-    ########
-
-    # def generate_demand_normal(self):
-
-    #     n = self.step_limit  # Total steps representing assessments in a day
-        
-    #     # Storage demand from normal distribution
-    #     storage_demand = np.random.normal(loc=0.5, scale=0.1, size=(self.n_objects, n))
-    #     storage_demand = np.clip(storage_demand, 0, 1)  # Ensure demand is within 0 to 1
-
-    #     # Bandwidth demand from normal distribution
-    #     bandwidth_demand = np.random.normal(loc=0.5, scale=0.1, size=(self.n_objects, n))
-    #     bandwidth_demand = np.clip(bandwidth_demand, 0, 1)  # Ensure demand is within 0 to 1
-        
-    #     # Combine time ratio, bandwidth, and storage demand for each object, resulting in (self.n_objects, n, 3)
-    #     demand = np.array([
-    #         np.column_stack([np.arange(n) / n, bandwidth_demand[i], storage_demand[i]])
-    #         # time ratio, bandwidth, and storage demand
-    #         for i in range(self.n_objects)
-    #     ])
-
-    #     # Reshape demand to ensure correct shape for each step (self.n_objects, 3) during each step
-    #     demand = demand.transpose((1, 0, 2))  # Shape will be (n, self.n_objects, 3)
-        
-    #     return demand
-    
-    # def generate_demand_probs(self):
-    #     # Generate demand of video objects' bandwidth and storage 
-    #     # Not Proxy nodes!! => bandwitdth and storage = 1
-    #     # 
-    #     # Number of steps per day (e.g., 72 assessments throughout the day)
-    #     n = self.step_limit  # Total steps representing assessments in a day
-        
-    #     # Define probabilities and bins for storage demand
-    #     storage_probs = np.array([0.1, 0.15, 0.3, 0.25, 0.15, 0.05])
-    #     storage_bins = np.array([0.1, 0.2, 0.3, 0.5, 0.7, 1.0])
-
-    #     # Define probabilities and bins for bandwidth demand
-    #     bandwidth_probs = np.array([0.1, 0.2, 0.4, 0.2, 0.1])
-    #     bandwidth_bins = np.array([0.1, 0.2, 0.4, 0.6, 0.8])
-
-    #     # Generate storage demand using predefined bins and probabilities
-    #     storage_demand = np.random.choice(storage_bins, p=storage_probs, size=(self.n_objects, n))
-
-    #     # Generate bandwidth demand using predefined bins and probabilities
-    #     bandwidth_demand = np.random.choice(bandwidth_bins, p=bandwidth_probs, size=(self.n_objects, n))
-    #     # Combine time ratio, bandwidth, and storage demand for each object, resulting in (self.n_objects, n, 3)
-    #     demand = np.array([
-    #         np.column_stack([np.arange(n) / n, bandwidth_demand[i], storage_demand[i]])
-    #         for i in range(self.n_objects)
-    #     ])
-
-    #     # Reshape demand to ensure correct shape for each step (self.n_objects, 3) during each step
-    #     demand = demand.transpose((1, 0, 2))  # Shape will be (n, self.n_objects, 3)
-        
-    #     return demand

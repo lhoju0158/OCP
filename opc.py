@@ -67,11 +67,11 @@ class OCPEnv_1(gym.Env):
             # action이 1차원인지 (Multibinary 인지) / action이 50개로 나왔는지 / binary의 값만 가지고 있는지
             raise ValueError("Invalid action: {}".format(action))
         
-        # print(f"target_proxy = {target_proxy}") # target_proxy 확인
+        print(f"target_proxy = {target_proxy}") # target_proxy 확인
 
         if len(target_proxy) == 0: # 아무것도 proxy sever에 copy 안하는 경우
             # reward = -1000 # 요구되는 bandwidth와 storage가 있는데도 불구하고 할당을 못하는 상황이니깐 reward 음수값 부여
-            done = True
+            done = True ######################## 여기 다시 확인
             # return 직전에 상태 update 해야한다
             self.update_state() 
             return self.state, reward, done, truncated, {}
@@ -116,7 +116,8 @@ class OCPEnv_1(gym.Env):
             # 현재 상황을 기반으로 전체적인 reward를 계산하는 것이 마땅함
             ### 여기서 reward 전체적으로 계산하기!!
 
-            reward+=10 * len(target_proxy) # 일단 대강 적기
+            reward += 10 * len(target_proxy) # 일단 대강 적기 
+            # 어떤게 좋은지 모르겠어서..
             # done은 아직 그래도 false -> 한 에피소드가 끝낼 경우만 done = True
 
         # 성공적으로 72회를 넘어섰을 때 -> 모든 video obj가 성공적으로 끝냄
@@ -142,7 +143,7 @@ class OCPEnv_1(gym.Env):
 
         self.state["proxy_state"][:,1:] = np.clip(self.state["proxy_state"][:,1:],0,1) # proxy_state cliping 하기
 
-        self.state["current_video_state"] = self.demand[self.current_step]
+        self.state["current_video_state"] = self.demand[step]
 
     def valid_action_mask(self):
         return self.valid_action_mask_2()

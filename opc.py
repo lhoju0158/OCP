@@ -67,7 +67,7 @@ class OCPEnv_1(gym.Env):
             # action이 1차원인지 (Multibinary 인지) / action이 50개로 나왔는지 / binary의 값만 가지고 있는지
             raise ValueError("Invalid action: {}".format(action))
         
-        print(f"target_proxy = {target_proxy}") # target_proxy 확인
+        # print(f"target_proxy = {target_proxy}") # target_proxy 확인
 
         if len(target_proxy) == 0: # 아무것도 proxy sever에 copy 안하는 경우
             # reward = -1000 # 요구되는 bandwidth와 storage가 있는데도 불구하고 할당을 못하는 상황이니깐 reward 음수값 부여
@@ -127,7 +127,6 @@ class OCPEnv_1(gym.Env):
     
 
         # return 직전에 상태 update하기
-        #### 여기에 ####
         self.update_state() 
 
         return self.state, reward, done, truncated, {} # 여기 마지막 값도 info 필요 {'action_mask': self.state["action_mask"]}
@@ -167,15 +166,16 @@ class OCPEnv_1(gym.Env):
 
             # 액션 0과 1에 대한 마스킹 설정
             if can_assign:
-                action_mask[i] = [True, True]
+                action_mask[i] = [True, True] # 각 index가 복사 유무를 말해준다
             else:
-                action_mask[i] = [True, False]
+                action_mask[i] = [True, False] # 복사 불가능
 
         return action_mask.flatten() # 자동으로 flatten 되는 듯 없어도 코드 이상 없음
         # return action_mask # 여기 flatten 유무 확인
 
 
     def generate_demand_normal(self):
+        np.random.seed(self.seed)
         n = self.step_limit  # Total steps representing assessments in a day
 
         # Storage demand from normal distribution for a single object

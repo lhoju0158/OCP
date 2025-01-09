@@ -15,6 +15,13 @@ import inspect
 # venv9_v2 기존 버전
 # venv9 lib update한 버전
 
+# bandwidth => 할당 이슈 비교하기, 이건 단순 copy가 아니라 다르게 해야 한다
+# masking => bandwidth / storage 이건 storage =>
+# update_state의 기능
+# BSR (bandwidth to space ratio) 단위 면적당 bandwidth를 최대화 해야한다
+
+# Masking의 대상은 오직 Storage이다 -> bandwidth 아니다
+
 class OCPEnv_1(gym.Env):
     def __init__(self, *args, **kwargs):
         self.n_nodes = 50 # proxy의 개수
@@ -87,10 +94,16 @@ class OCPEnv_1(gym.Env):
             proxy_storage = self.state["proxy_state"][single_proxy, 2]
 
             # 불가능하다면 is_invalidable을 True로 바꾸기
-            if (1 + self.tol < current_video_bandwidth + proxy_bandwidth) or (1 + self.tol <current_video_storage + proxy_storage) :
+            # 여기서 불가능한건 storage가 넘는 순간 => masking의 대상이니깐
+            if (1 + self.tol <current_video_storage + proxy_storage) :
                 is_invalidable = True
                 print(f"current single_proxy {single_proxy} is not invalidable")
                 break
+
+            # 이건 bandwitdh의 대상
+            if (1+self.tol<current_video_bandwidth+proxy_bandwidth):
+
+
 
             # 활성화 하기
             if proxy_activate == 0:
@@ -112,6 +125,7 @@ class OCPEnv_1(gym.Env):
             reward = -1000
             done = True
         else:
+            for(self.state["proxy_state"][:,1]==)
             # 가능한 action만 선택한 경우 => 성공적으로 이번 step이 종료됨
             # 현재 상황을 기반으로 전체적인 reward를 계산하는 것이 마땅함
             ### 여기서 reward 전체적으로 계산하기!!
@@ -150,17 +164,19 @@ class OCPEnv_1(gym.Env):
 
     def valid_action_mask_2(self):
         # 2차원 배열로 초기화
+        # 여기서 bandwidth는 대상이 아니다 
+        # storage만 대상
         action_mask = np.zeros((self.n_nodes, 2), dtype=bool)
 
         for i in range(self.n_nodes):
-            proxy_bandwidth = self.state["proxy_state"][i, 1]
+            # proxy_bandwidth = self.state["proxy_state"][i, 1]
             proxy_storage = self.state["proxy_state"][i, 2]
-            current_video_bandwidth = self.state["current_video_state"][1]
+            # current_video_bandwidth = self.state["current_video_state"][1]
             current_video_storage = self.state["current_video_state"][2]
 
             # 노드가 현재 비디오를 수용할 수 있는지 확인
             can_assign = (
-                proxy_bandwidth + current_video_bandwidth <= self.cache_capacity + self.tol and
+                # proxy_bandwidth + current_video_bandwidth <= self.cache_capacity + self.tol and
                 proxy_storage + current_video_storage <= self.cache_capacity + self.tol
             )
 

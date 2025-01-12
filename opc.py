@@ -86,10 +86,10 @@ class OCPEnv_1(gym.Env):
             raise ValueError("Invalid action: {}".format(action))
         
         if len(temp_target_proxy) == 0: # 아무것도 proxy sever에 copy 안하는 경우
-            # reward = -1000 # 요구되는 bandwidth와 storage가 있는데도 불구하고 할당을 못하는 상황이니깐 reward 음수값 부여
+            reward = -1000 # 요구되는 bandwidth와 storage가 있는데도 불구하고 할당을 못하는 상황이니깐 reward 음수값 부여
             # done = True ######################## 여기 다시 확인 => 일단 끝내는게 아니라 reward를 낮게 주면서 이 상황이 안오게 하는게 좋을 듯
             # return 직전에 상태 update 해야한다
-            self.update_state() 
+            self.update_state_2(actual_target_proxy) 
             return self.state, reward, done, truncated, {}
 
         # 최적화하면서 할당 시작
@@ -100,7 +100,8 @@ class OCPEnv_1(gym.Env):
         is_optimized = False
         print(f"temp_target_proxy = {temp_target_proxy}")
 
-        if self.current_step !=0:
+        if self.current_step !=0 and len(temp_target_proxy)<self.n_nodes/3:
+            # len 길이에 따라 최적화 유무 결정한 이유는 학습 속도가 너무 안나와서
             for subset_size in range(1,len(temp_target_proxy) +1):
                 print(f"subset_size = {subset_size}")
                 subsets = [list(comb) for comb in itertools.combinations(indices, subset_size)]
@@ -148,12 +149,14 @@ class OCPEnv_1(gym.Env):
         # 2. agent의 action_space가 모두 유효한지 그 차이에 대한 reward (실제 allocation도 update)
         if is_optimized:        
             # 일단 최적화가 이루어졌다면
+            actual_target_proxy = np.zeros((len(best_subset), 2))
             actual_target_proxy[:,0] = best_subset
             actual_target_proxy[:,1] = best_allocation
             reward += (len(best_subset)-len(temp_target_proxy))
 
         else:
             # 최적화가 이루어 지지 않았다 => 요구하는 bandwidth를 모두 충족하지 못함
+            actual_target_proxy = np.zeros((len(temp_target_proxy), 2))
             actual_target_proxy[:,0] = temp_target_proxy
             # print(f"actual_target_proxy = {actual_target_proxy}")
             for i in range(len(actual_target_proxy)):
@@ -170,7 +173,12 @@ class OCPEnv_1(gym.Env):
         
         # 4. 얼마나 균등하게 되었는가 (현재 모든 proxy 기준) => 전체 보상
         currnet_variance = np.var(self.state["proxy_state"][:,1])
-        reward+=(100/currnet_variance) # current_variance는 작을 수록 좋음
+        # print(f"current_variance = {currnet_variance}")
+        # exit(0)
+        if currnet_variance !=0:
+            reward+=(1/currnet_variance) # current_variance는 작을 수록 좋음
+        else:
+            reward+=100
         
         ## update_state
         self.update_state_2(actual_target_proxy) # 이제 할당하기
@@ -194,15 +202,24 @@ class OCPEnv_1(gym.Env):
         step = self.current_step if self.current_step < self.step_limit else self.step_limit - 1 # current_step update
 
         # proxy_state update for bandwidh and storage
-        for i in actual_target_proxy[:,0]:
-            self.state["proxy_state"][i,1] = actual_target_proxy[i,1]
-            self.state["proxy_state"][i,2] = self.state["current_video_state"][2]
+        # print(f"actual_targt_proxy[:,0] = {actual_target_proxy[:,0]}")
+        # exit(0)
+
+        for i in range(len(actual_target_proxy)):
+            idx = int(actual_target_proxy[i,0])
+            # print(f"actual_target_proxy = {actual_target_proxy[idx,1]}")
+            # print(f"self.state~ = {self.state['proxy_state'][idx,1]}")
+            # exit(0)
+            self.state["proxy_state"][idx,1] = actual_target_proxy[i,1]
+            self.state["proxy_state"][idx,2] = self.state["current_video_state"][2]
 
         # current_video_state
         self.state["current_video_state"] = self.demand[step]
 
         # proxy_list
-        self.state["proxy_list"] = actual_target_proxy[:,0]/50
+        self.state["proxy_list"] = np.zeros(self.n_nodes, dtype=np.float32)  # 초기화
+        for i in actual_target_proxy[:, 0].astype(int):
+            self.state["proxy_list"][i] = 1.0  # 복사 대상인 proxy는 1로 설정
 
         # state cliping
         self.state["proxy_state"][:,1:] = np.clip(self.state["proxy_state"][:,1:],0,1) # proxy_state cliping 하기

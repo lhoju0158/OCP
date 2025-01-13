@@ -76,15 +76,34 @@ class OCPEnv_1(gym.Env):
             self.update_state_2(actual_target_proxy) 
             return self.state, reward, done, truncated, {}
 
+        ## 속도를 위한 코드
+
+        if self.current_step!=0 and len(temp_target_proxy)>self.n_nodes/3:
+            # temp_target_proxy의 수가 너무 많은 경우 => 학습 속도를 위해서 temp_target_proxy의 수 제한하기
+            # print(f"== before ==\ntemp_target_proxy = {temp_target_proxy}")
+            max_proxy_num = int(self.n_nodes/3)
+            # print(f"max_proxy_num = {max_proxy_num}")
+            # temp_target_proxy에서 각 proxy의 현재 bandwidth 값을 가져옴
+            proxy_bandwidths = {i: self.state["proxy_state"][i, 1] for i in temp_target_proxy}
+
+            # print(f"proxy_bandwidths = {proxy_bandwidths}")
+            # bandwidth 기준으로 오름차순 정렬 (남은 bandwidth가 많은 proxy 우선)
+            sorted_proxies = sorted(proxy_bandwidths.keys(), key=lambda x: proxy_bandwidths[x])
+
+            # 최대 max_proxy_num만큼 proxy를 남김
+            temp_target_proxy = np.array(sorted_proxies[:max_proxy_num])
+            # print(f"== after ==\ntemp_target_proxy = {temp_target_proxy}")
+
         # 최적화하면서 할당 시작
         indices = np.arange(len(temp_target_proxy)) # index화 하기
         best_variance = float("inf") # 분산을 통해 각 proxy의 균등 정도 수치화 비교
         best_subset = None # action_space 중에서 최종적으로 
         best_allocation = None
         is_optimized = False
+        allocation_lost = 0
         print(f"temp_target_proxy = {temp_target_proxy}")
 
-        if self.current_step !=0 and len(temp_target_proxy)<self.n_nodes/3: # 학습 속도를 위해서 최적화 조건 조절
+        if self.current_step !=0: # 학습 속도를 위해서 최적화 조건 조절
             for subset_size in range(1,len(temp_target_proxy) +1):
                 subsets = [list(comb) for comb in itertools.combinations(indices, subset_size)]
 
@@ -118,15 +137,16 @@ class OCPEnv_1(gym.Env):
                             is_optimized = True
                             best_variance = result.fun
                             best_subset = subset_indices
-                            best_allocation = result.x
-        else:
+                            best_allocation = result.x  
+        else: # self.current_step == 0
             is_optimized = True
             best_subset = temp_target_proxy
             best_allocation = [self.state["current_video_state"][1]/len(best_subset)]*len(best_subset)
-        
+
+
         ## reward 관련 (reward 종류 별 중요도에 의한 가중치는 추후에 생각하기)
         # 1. step에 따라서 증가
-        reward += self.current_step*10
+        reward += self.current_step
 
         # 2. agent의 action_space가 모두 유효한지 그 차이에 대한 reward (실제 allocation도 update)
         if is_optimized: # 일단 최적화 이후
@@ -143,6 +163,7 @@ class OCPEnv_1(gym.Env):
                 actual_target_proxy[i,1] = (1-self.state["proxy_state"][idx[i],1]) # action_space에서 원하는 proxy에 남은 bandwidth
             lost_bandwidth = np.sum(actual_target_proxy[:,1])
             reward -= lost_bandwidth * 10 # 할당에 실패한 bandwidth 만큼 가중치 빼기
+            allocation_lost+=1
 
         # 3. 단일한 step에 할당된 bandwidth에 대한 reward => 독립 보상
         reward+=np.sum(actual_target_proxy[:,1])
@@ -151,16 +172,18 @@ class OCPEnv_1(gym.Env):
         currnet_variance = np.var(self.state["proxy_state"][:,1])
 
         if currnet_variance !=0: # reward inf 방지
-            reward+=(1/currnet_variance) # current_variance는 작을 수록 좋음
+            reward+=(1/(currnet_variance*100)) # current_variance는 작을 수록 좋음
         else:
             reward+=1000
         
         ## update_state
         self.update_state_2(actual_target_proxy)
 
-        # 성공적으로 72회를 넘어섰을 때 -> 모든 video obj가 성공적으로 끝냄
+        # 모든 video object에  넘어섰을 때 -> 모든 video obj가 성공적으로 끝냄
         if self.current_step>=self.step_limit:
             print(f"current episode is done!!!")
+            # 만일 과정 중 video object 할당에 실패했다면
+            reward-=allocation_lost*10
             done = True
 
         print(f"current reward = {reward}")    
@@ -272,9 +295,6 @@ class OCPEnv_1(gym.Env):
 
     def reset(self, **kwargs):
         return self._RESET()
-    
-    # def generate_demand(self):
-    #     return self.generate_demand_normal()
     
     def step(self, action):
         # print(f"================ step start ================")

@@ -21,7 +21,7 @@ class OCPEnv_1(gym.Env):
         self.seed = 0 # 초기 seed 값
         assign_env_config(self, kwargs) # 파라미터로 온 seed 값 지정하기
         self.storage_capacity = 1 # storage capacity = 1
-        self.sigle_proxy_capacity = 20000 # proxy capacity = 20000
+        self.sigle_proxy_capacity = 2000 
         self.t_interval = 20
         self.step_limit = int(60 * 24 / self.t_interval) # Total steps per day based on time intervals => 총 72번의 step_limit
         self.tol =0.0 # 오차값 0으로 수정
@@ -33,7 +33,8 @@ class OCPEnv_1(gym.Env):
             # "action_masks": spaces.Box(0, 1, shape=(self.n_nodes,), dtype=bool), => action_space는 wrapper로 해야 한다!!
             "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3), dtype=np.float32), # 현재 proxy 할당 된 상태 (초기값 = 0)
             "current_video_state": spaces.Box(0,1,shape=(3,), dtype=np.float32), # 현재 step에서 할당 당하는 video의 싱테 (order, bandwidth, storage)
-            "proxy_list": spaces.Box(0,1,shape=(self.n_nodes,),dtype=np.float32) # 실제로 할당 대상이 되는 proxy (할당 대상 O: 1, 할당 대상 X: 0)
+            "proxy_list": spaces.Box(0,1,shape=(self.n_nodes,),dtype=np.float32), # 실제로 할당 대상이 되는 proxy (할당 대상 O: 1, 할당 대상 X: 0)
+            "video_demand": spaces.Box(0,1,shape=(self.step_limit,3),dtype=np.float32)
         })
 
         if self.seed == 0: # 만약 seed가 제대로 전달 안될 경우
@@ -49,7 +50,8 @@ class OCPEnv_1(gym.Env):
             # "action_masks": np.zeros((self.n_nodes)),
             "proxy_state": np.zeros((self.n_nodes, 3), dtype=np.float32),
             "current_video_state": self.demand[self.current_step],
-            "proxy_list": np.zeros((self.n_nodes,), dtype=np.float32)
+            "proxy_list": np.zeros((self.n_nodes,), dtype=np.float32),
+            "video_demand": self.demand
         }
         self.assignment = {} # 각 step의 할당 과정 저장 배열
 
@@ -78,10 +80,10 @@ class OCPEnv_1(gym.Env):
 
         ## 속도를 위한 코드
 
-        if self.current_step!=0 and len(temp_target_proxy)>self.n_nodes/3:
+        if self.current_step!=0 and len(temp_target_proxy)>self.n_nodes/4:
             # temp_target_proxy의 수가 너무 많은 경우 => 학습 속도를 위해서 temp_target_proxy의 수 제한하기
             # print(f"== before ==\ntemp_target_proxy = {temp_target_proxy}")
-            max_proxy_num = int(self.n_nodes/3)
+            max_proxy_num = int(self.n_nodes/4)
             # print(f"max_proxy_num = {max_proxy_num}")
             # temp_target_proxy에서 각 proxy의 현재 bandwidth 값을 가져옴
             proxy_bandwidths = {i: self.state["proxy_state"][i, 1] for i in temp_target_proxy}
@@ -100,8 +102,7 @@ class OCPEnv_1(gym.Env):
         best_subset = None # action_space 중에서 최종적으로 
         best_allocation = None
         is_optimized = False
-        allocation_lost = 0
-        print(f"temp_target_proxy = {temp_target_proxy}")
+        # print(f"temp_target_proxy = {temp_target_proxy}")
 
         if self.current_step !=0: # 학습 속도를 위해서 최적화 조건 조절
             for subset_size in range(1,len(temp_target_proxy) +1):
@@ -156,14 +157,14 @@ class OCPEnv_1(gym.Env):
             reward += (len(best_subset)-len(temp_target_proxy))
 
         else: # 최적화가 이루어 지지 않았다 => 요구하는 bandwidth를 모두 충족하지 못함
+            print(f"=============== allocation is not optimized!! ===============")
             actual_target_proxy = np.zeros((len(temp_target_proxy), 2))
             actual_target_proxy[:,0] = temp_target_proxy
             for i in range(len(actual_target_proxy)):
                 idx = actual_target_proxy[:,0].astype(int)
                 actual_target_proxy[i,1] = (1-self.state["proxy_state"][idx[i],1]) # action_space에서 원하는 proxy에 남은 bandwidth
             lost_bandwidth = np.sum(actual_target_proxy[:,1])
-            reward -= lost_bandwidth * 10 # 할당에 실패한 bandwidth 만큼 가중치 빼기
-            allocation_lost+=1
+            reward -= lost_bandwidth * 100 # 할당에 실패한 bandwidth 만큼 가중치 빼기
 
         # 3. 단일한 step에 할당된 bandwidth에 대한 reward => 독립 보상
         reward+=np.sum(actual_target_proxy[:,1])
@@ -176,17 +177,22 @@ class OCPEnv_1(gym.Env):
         else:
             reward+=1000
         
+        ### for checking
+        actual_target_proxy_for_print = np.zeros(len(actual_target_proxy), dtype=int)  # 적절한 크기의 배열로 초기화
+        for i in range(len(actual_target_proxy)):
+            actual_target_proxy_for_print[i] = int(actual_target_proxy[i][0])
+        print(f"In step {self.current_step}, actual_target_proxy = {actual_target_proxy_for_print}, current reward = {reward}")    
+        ###
+
         ## update_state
         self.update_state_2(actual_target_proxy)
 
         # 모든 video object에  넘어섰을 때 -> 모든 video obj가 성공적으로 끝냄
         if self.current_step>=self.step_limit:
-            print(f"current episode is done!!!")
-            # 만일 과정 중 video object 할당에 실패했다면
-            reward-=allocation_lost*10
+            print(f"=============== current episode is done!!! ===============")
             done = True
-
-        print(f"current reward = {reward}")    
+        
+        
         return self.state, reward, done, truncated, {} # 여기 마지막 값도 info 필요 {'action_mask': self.state["action_mask"]}
 
     # update function for version 2

@@ -34,7 +34,8 @@ class OCPEnv_1(gym.Env):
             "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3), dtype=np.float32), # 현재 proxy 할당 된 상태 (초기값 = 0)
             "current_video_state": spaces.Box(0,1,shape=(3,), dtype=np.float32), # 현재 step에서 할당 당하는 video의 싱테 (order, bandwidth, storage)
             "proxy_list": spaces.Box(0,1,shape=(self.n_nodes,),dtype=np.float32), # 실제로 할당 대상이 되는 proxy (할당 대상 O: 1, 할당 대상 X: 0)
-            "video_demand": spaces.Box(0,1,shape=(self.step_limit,3),dtype=np.float32)
+            "whole_video_demand": spaces.Box(0,1,shape=(self.step_limit,3),dtype=np.float32), # 해당 episode에서 할당 대상이 되는 video_demand의 전체 분포
+            "current_allocated_video_state": spaces.Box(0,1,shape={3,},dtype=np.float32), # 실제로 할당 된 video_state(bandwidth, storage)
         })
 
         if self.seed == 0: # 만약 seed가 제대로 전달 안될 경우
@@ -51,7 +52,8 @@ class OCPEnv_1(gym.Env):
             "proxy_state": np.zeros((self.n_nodes, 3), dtype=np.float32),
             "current_video_state": self.demand[self.current_step],
             "proxy_list": np.zeros((self.n_nodes,), dtype=np.float32),
-            "video_demand": self.demand
+            "whole_video_demand": self.demand,
+            "current_allocated_video_state": np.zeros((3,), dtype=np.float32),
         }
         self.assignment = {} # 각 step의 할당 과정 저장 배열
 
@@ -62,7 +64,7 @@ class OCPEnv_1(gym.Env):
     # current_video_state의 bandwidth가 모두 할당되지 않을 수 있다
 
     def _STEP_2(self, action):
-        # print("step start!")
+        print("step start!")
         done = False
         truncated = False
         reward = 0
@@ -76,6 +78,7 @@ class OCPEnv_1(gym.Env):
         if len(temp_target_proxy) == 0: # agent의 action_space가 그 무엇도 copy하길 원하지 않을 때
             reward = -1000 # 요구되는 bandwidth와 storage가 있는데도 불구하고 할당을 못하는 상황이니깐 reward 음수값 부여
             self.update_state_2(actual_target_proxy) 
+            print(f"In step {self.current_step},len is Zero!, current reward = {reward}")    
             return self.state, reward, done, truncated, {}
 
         ## 속도를 위한 코드
@@ -157,13 +160,18 @@ class OCPEnv_1(gym.Env):
             reward += (len(best_subset)-len(temp_target_proxy))
 
         else: # 최적화가 이루어 지지 않았다 => 요구하는 bandwidth를 모두 충족하지 못함
-            print(f"=============== allocation is not optimized!! ===============")
+            # print(f"=============== allocation is not optimized!! ===============")
+            # print(f"temp_target_proxy = {temp_target_proxy}")
+            # print(f"current_video_state = {self.state['current_video_state'][1]}")
             actual_target_proxy = np.zeros((len(temp_target_proxy), 2))
             actual_target_proxy[:,0] = temp_target_proxy
             for i in range(len(actual_target_proxy)):
                 idx = actual_target_proxy[:,0].astype(int)
                 actual_target_proxy[i,1] = (1-self.state["proxy_state"][idx[i],1]) # action_space에서 원하는 proxy에 남은 bandwidth
-            lost_bandwidth = np.sum(actual_target_proxy[:,1])
+            # print(f"actual_target_proxy = {actual_target_proxy}")
+            lost_bandwidth = self.state["current_video_state"][1]-np.sum(actual_target_proxy[:,1])
+            # print(f"lost_bandwidth = {lost_bandwidth}")
+            # print(f"proxy_state = {self.state['proxy_state'][:,1]}")
             reward -= lost_bandwidth * 100 # 할당에 실패한 bandwidth 만큼 가중치 빼기
 
         # 3. 단일한 step에 할당된 bandwidth에 대한 reward => 독립 보상
@@ -191,14 +199,21 @@ class OCPEnv_1(gym.Env):
         if self.current_step>=self.step_limit:
             print(f"=============== current episode is done!!! ===============")
             done = True
-        
+        print("step end!!")
         
         return self.state, reward, done, truncated, {} # 여기 마지막 값도 info 필요 {'action_mask': self.state["action_mask"]}
 
     # update function for version 2
     def update_state_2(self,actual_target_proxy):
-        # update_state의 대상: proxy_state, current_video_state, proxy_list, current_step
+        # update_state의 대상: proxy_state, current_video_state, proxy_list, current_step, actual_allocated_video_state
         # action_mask의 경우 ActionMaker로 Wrapping 하기 때문에 update 필요 없다
+        # actual_allocated_video_state
+        self.state["current_allocated_video_state"][0] = self.state["current_video_state"][0]
+        self.state["current_allocated_video_state"][1] = 0.0 # bandwidth 초기화화
+        if len(actual_target_proxy)==0:
+            self.state["current_allocated_video_state"][2] = self.state["current_video_state"][2] # storage
+        else:
+            self.state["current_allocated_video_state"][2] = 0.0 # 그 무엇도 할당되지 않음
 
         # current_step
         self.current_step += 1
@@ -207,8 +222,9 @@ class OCPEnv_1(gym.Env):
         # proxy_state update for bandwidh and storage
         for i in range(len(actual_target_proxy)):
             idx = int(actual_target_proxy[i,0])
-            self.state["proxy_state"][idx,1] = actual_target_proxy[i,1]
-            self.state["proxy_state"][idx,2] = self.state["current_video_state"][2]
+            self.state["current_allocated_video_state"][1]+= actual_target_proxy[i,1] 
+            self.state["proxy_state"][idx,1] += actual_target_proxy[i,1]
+            self.state["proxy_state"][idx,2] += self.state["current_video_state"][2]
 
         # current_video_state
         self.state["current_video_state"] = self.demand[step]
@@ -218,8 +234,11 @@ class OCPEnv_1(gym.Env):
         for i in actual_target_proxy[:, 0].astype(int):
             self.state["proxy_list"][i] = 1.0  # 복사 대상인 proxy는 1로 설정
 
+        print(f"== after update_state ==\nproxy_state = {self.state['proxy_state'][:,1]}")
+        print(f"proxy_list_state = {self.state['proxy_list']}")
         # state cliping
         self.state["proxy_state"][:,1:] = np.clip(self.state["proxy_state"][:,1:],0,1) # proxy_state cliping 하기
+
 
 
     def valid_action_mask(self):

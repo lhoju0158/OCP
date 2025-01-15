@@ -64,7 +64,7 @@ class OCPEnv_1(gym.Env):
     # current_video_state의 bandwidth가 모두 할당되지 않을 수 있다
 
     def _STEP_2(self, action):
-        print("step start!")
+        # print("step start!")
         done = False
         truncated = False
         reward = 0
@@ -77,129 +77,127 @@ class OCPEnv_1(gym.Env):
         
         if len(temp_target_proxy) == 0: # agent의 action_space가 그 무엇도 copy하길 원하지 않을 때
             reward = -1000 # 요구되는 bandwidth와 storage가 있는데도 불구하고 할당을 못하는 상황이니깐 reward 음수값 부여
-            self.update_state_2(actual_target_proxy) 
-            print(f"In step {self.current_step},len is Zero!, current reward = {reward}")    
-            return self.state, reward, done, truncated, {}
-
-        ## 속도를 위한 코드
-
-        if self.current_step!=0 and len(temp_target_proxy)>self.n_nodes/5:
-            # temp_target_proxy의 수가 너무 많은 경우 => 학습 속도를 위해서 temp_target_proxy의 수 제한하기
-            # print(f"== before ==\ntemp_target_proxy = {temp_target_proxy}")
-            max_proxy_num = int(self.n_nodes/5)
-            # print(f"max_proxy_num = {max_proxy_num}")
-            # temp_target_proxy에서 각 proxy의 현재 bandwidth 값을 가져옴
-            proxy_bandwidths = {i: self.state["proxy_state"][i, 1] for i in temp_target_proxy}
-
-            # print(f"proxy_bandwidths = {proxy_bandwidths}")
-            # bandwidth 기준으로 오름차순 정렬 (남은 bandwidth가 많은 proxy 우선)
-            sorted_proxies = sorted(proxy_bandwidths.keys(), key=lambda x: proxy_bandwidths[x])
-
-            # 최대 max_proxy_num만큼 proxy를 남김
-            temp_target_proxy = np.array(sorted_proxies[:max_proxy_num])
-            # print(f"== after ==\ntemp_target_proxy = {temp_target_proxy}")
-
-        # 최적화하면서 할당 시작
-        indices = np.arange(len(temp_target_proxy)) # index화 하기
-        best_variance = float("inf") # 분산을 통해 각 proxy의 균등 정도 수치화 비교
-        best_subset = None # action_space 중에서 최종적으로 
-        best_allocation = None
-        is_optimized = False
-        # print(f"temp_target_proxy = {temp_target_proxy}")
-
-        if self.current_step !=0: # 학습 속도를 위해서 최적화 조건 조절
-            for subset_size in range(1,len(temp_target_proxy) +1):
-                subsets = [list(comb) for comb in itertools.combinations(indices, subset_size)]
-
-                for subset in subsets:
-                    # 실제 index 매핑
-                    subset_indices = [temp_target_proxy[i] for i in subset]
-
-                    # 초기값 및 제약 조건 설정
-                    x0 = np.zeros(len(subset))
-                    bounds = [(0, 1.0 - self.state["proxy_state"][i,1]) for i in subset_indices]
-
-                    constraints = [
-                        {"type": "eq", "fun": lambda x: np.sum(x) - self.state["current_video_state"][1]}  # bandwidth 분배
-                    ]
-
-                    # 목적 함수: 선택된 subset에 대한 균등성 평가
-                    def objective(x):
-                        b_final = self.state["proxy_state"][:,1].copy()
-                        for i, xi in zip(subset_indices, x):
-                            b_final[i] += xi
-                        mu = np.mean(b_final)
-                        variance = np.mean((b_final - mu) ** 2)
-                        return variance
-
-                    # 최적화 실행
-                    result = minimize(objective, x0, bounds=bounds, constraints=constraints)
-
-                    if result.success:
-                        # 현재 subset의 결과가 가장 작은 분산을 가지는지 확인
-                        if result.fun < best_variance:
-                            is_optimized = True
-                            best_variance = result.fun
-                            best_subset = subset_indices
-                            best_allocation = result.x  
-        else: # self.current_step == 0
-            is_optimized = True
-            best_subset = temp_target_proxy
-            best_allocation = [self.state["current_video_state"][1]/len(best_subset)]*len(best_subset)
-
-
-        ## reward 관련 (reward 종류 별 중요도에 의한 가중치는 추후에 생각하기)
-        # 1. step에 따라서 증가
-        reward += self.current_step
-
-        # 2. agent의 action_space가 모두 유효한지 그 차이에 대한 reward (실제 allocation도 update)
-        if is_optimized: # 일단 최적화 이후
-            actual_target_proxy = np.zeros((len(best_subset), 2))
-            actual_target_proxy[:,0] = best_subset
-            actual_target_proxy[:,1] = best_allocation
-            reward += (len(best_subset)-len(temp_target_proxy))
-
-        else: # 최적화가 이루어 지지 않았다 => 요구하는 bandwidth를 모두 충족하지 못함
-            # print(f"=============== allocation is not optimized!! ===============")
-            # print(f"temp_target_proxy = {temp_target_proxy}")
-            # print(f"current_video_state = {self.state['current_video_state'][1]}")
-            actual_target_proxy = np.zeros((len(temp_target_proxy), 2))
-            actual_target_proxy[:,0] = temp_target_proxy
-            for i in range(len(actual_target_proxy)):
-                idx = actual_target_proxy[:,0].astype(int)
-                actual_target_proxy[i,1] = (1-self.state["proxy_state"][idx[i],1]) # action_space에서 원하는 proxy에 남은 bandwidth
-            # print(f"actual_target_proxy = {actual_target_proxy}")
-            lost_bandwidth = self.state["current_video_state"][1]-np.sum(actual_target_proxy[:,1])
-            # print(f"lost_bandwidth = {lost_bandwidth}")
-            # print(f"proxy_state = {self.state['proxy_state'][:,1]}")
-            reward -= lost_bandwidth * 100 # 할당에 실패한 bandwidth 만큼 가중치 빼기
-
-        # 3. 단일한 step에 할당된 bandwidth에 대한 reward => 독립 보상
-        reward+=np.sum(actual_target_proxy[:,1])
-        
-        # 4. 얼마나 균등하게 되었는가 (현재 모든 proxy 기준) => 전체 보상
-        currnet_variance = np.var(self.state["proxy_state"][:,1])
-
-        if currnet_variance !=0: # reward inf 방지
-            reward+=(1/(currnet_variance*100)) # current_variance는 작을 수록 좋음
+            # print(f"In step {self.current_step},len is Zero!, current reward = {reward}")    
         else:
-            reward+=1000
+            ## 속도를 위한 코드
+            if self.current_step!=0 and len(temp_target_proxy)>self.n_nodes/3:
+                # temp_target_proxy의 수가 너무 많은 경우 => 학습 속도를 위해서 temp_target_proxy의 수 제한하기
+                # print(f"== before ==\ntemp_target_proxy = {temp_target_proxy}")
+                max_proxy_num = int(self.n_nodes/3)
+                # print(f"max_proxy_num = {max_proxy_num}")
+                # temp_target_proxy에서 각 proxy의 현재 bandwidth 값을 가져옴
+                proxy_bandwidths = {i: self.state["proxy_state"][i, 1] for i in temp_target_proxy}
+
+                # print(f"proxy_bandwidths = {proxy_bandwidths}")
+                # bandwidth 기준으로 오름차순 정렬 (남은 bandwidth가 많은 proxy 우선)
+                sorted_proxies = sorted(proxy_bandwidths.keys(), key=lambda x: proxy_bandwidths[x])
+
+                # 최대 max_proxy_num만큼 proxy를 남김
+                temp_target_proxy = np.array(sorted_proxies[:max_proxy_num])
+                # print(f"== after ==\ntemp_target_proxy = {temp_target_proxy}")
+
+            # 최적화하면서 할당 시작
+            indices = np.arange(len(temp_target_proxy)) # index화 하기
+            best_variance = float("inf") # 분산을 통해 각 proxy의 균등 정도 수치화 비교
+            best_subset = None # action_space 중에서 최종적으로 
+            best_allocation = None
+            is_optimized = False
+            print(f"temp_target_proxy = {temp_target_proxy}")
+
+            if self.current_step !=0: # 학습 속도를 위해서 최적화 조건 조절
+                for subset_size in range(1,len(temp_target_proxy) +1):
+                    subsets = [list(comb) for comb in itertools.combinations(indices, subset_size)]
+
+                    for subset in subsets:
+                        # 실제 index 매핑
+                        subset_indices = [temp_target_proxy[i] for i in subset]
+
+                        # 초기값 및 제약 조건 설정
+                        x0 = np.zeros(len(subset))
+                        bounds = [(0, 1.0 - self.state["proxy_state"][i,1]) for i in subset_indices]
+
+                        constraints = [
+                            {"type": "eq", "fun": lambda x: np.sum(x) - self.state["current_video_state"][1]}  # bandwidth 분배
+                        ]
+
+                        # 목적 함수: 선택된 subset에 대한 균등성 평가
+                        def objective(x):
+                            b_final = self.state["proxy_state"][:,1].copy()
+                            for i, xi in zip(subset_indices, x):
+                                b_final[i] += xi
+                            mu = np.mean(b_final)
+                            variance = np.mean((b_final - mu) ** 2)
+                            return variance
+
+                        # 최적화 실행
+                        result = minimize(objective, x0, bounds=bounds, constraints=constraints)
+
+                        if result.success:
+                            # 현재 subset의 결과가 가장 작은 분산을 가지는지 확인
+                            if result.fun < best_variance:
+                                is_optimized = True
+                                best_variance = result.fun
+                                best_subset = subset_indices
+                                best_allocation = result.x  
+            else: # self.current_step == 0
+                is_optimized = True
+                best_subset = temp_target_proxy
+                best_allocation = [self.state["current_video_state"][1]/len(best_subset)]*len(best_subset)
+
+
+            ## reward 관련 (reward 종류 별 중요도에 의한 가중치는 추후에 생각하기)
+            # 1. step에 따라서 증가
+            reward += self.current_step
+
+            # 2. agent의 action_space가 모두 유효한지 그 차이에 대한 reward (실제 allocation도 update)
+            if is_optimized: # 일단 최적화 이후
+                actual_target_proxy = np.zeros((len(best_subset), 2))
+                actual_target_proxy[:,0] = best_subset
+                actual_target_proxy[:,1] = best_allocation
+                reward += (len(best_subset)-len(temp_target_proxy))
+
+            else: # 최적화가 이루어 지지 않았다 => 요구하는 bandwidth를 모두 충족하지 못함
+                # print(f"=============== allocation is not optimized!! ===============")
+                # print(f"temp_target_proxy = {temp_target_proxy}")
+                # print(f"current_video_state = {self.state['current_video_state'][1]}")
+                actual_target_proxy = np.zeros((len(temp_target_proxy), 2))
+                actual_target_proxy[:,0] = temp_target_proxy
+                for i in range(len(actual_target_proxy)):
+                    idx = actual_target_proxy[:,0].astype(int)
+                    actual_target_proxy[i,1] = (1-self.state["proxy_state"][idx[i],1]) # action_space에서 원하는 proxy에 남은 bandwidth
+                # print(f"actual_target_proxy = {actual_target_proxy}")
+                lost_bandwidth = self.state["current_video_state"][1]-np.sum(actual_target_proxy[:,1])
+                # print(f"lost_bandwidth = {lost_bandwidth}")
+                # print(f"proxy_state = {self.state['proxy_state'][:,1]}")
+                reward -= lost_bandwidth * 100 # 할당에 실패한 bandwidth 만큼 가중치 빼기
+
+            # 3. 단일한 step에 할당된 bandwidth에 대한 reward => 독립 보상
+            reward+=np.sum(actual_target_proxy[:,1])
+            
+            # 4. 얼마나 균등하게 되었는가 (현재 모든 proxy 기준) => 전체 보상
+            currnet_variance = np.var(self.state["proxy_state"][:,1])
+
+            if currnet_variance !=0: # reward inf 방지
+                reward+=(1/(currnet_variance*100)) # current_variance는 작을 수록 좋음
+            else:
+                reward+=1000
         
         ### for checking
         actual_target_proxy_for_print = np.zeros(len(actual_target_proxy), dtype=int)  # 적절한 크기의 배열로 초기화
         for i in range(len(actual_target_proxy)):
             actual_target_proxy_for_print[i] = int(actual_target_proxy[i][0])
-        print(f"In step {self.current_step}, actual_target_proxy = {actual_target_proxy_for_print}, current reward = {reward}")    
+        # print(f"In step {self.current_step}, actual_target_proxy = {actual_target_proxy_for_print}, current reward = {reward}")    
         ###
 
         ## update_state
         self.update_state_2(actual_target_proxy)
 
         # 모든 video object에  넘어섰을 때 -> 모든 video obj가 성공적으로 끝냄
-        if self.current_step>=self.step_limit:
+        # print(f"self.current_step = {self.current_step}, self.step_limit = {self.step_limit}")
+        if self.current_step==self.step_limit:
             print(f"=============== current episode is done!!! ===============")
             done = True
-        print("step end!!")
+        # print("step end!!")
         
         return self.state, reward, done, truncated, {} # 여기 마지막 값도 info 필요 {'action_mask': self.state["action_mask"]}
 
@@ -208,6 +206,7 @@ class OCPEnv_1(gym.Env):
         # update_state의 대상: proxy_state, current_video_state, proxy_list, current_step, actual_allocated_video_state
         # action_mask의 경우 ActionMaker로 Wrapping 하기 때문에 update 필요 없다
         # actual_allocated_video_state
+        # print("== before update_state ==")
         self.state["current_allocated_video_state"][0] = self.state["current_video_state"][0]
         self.state["current_allocated_video_state"][1] = 0.0 # bandwidth 초기화화
         if len(actual_target_proxy)==0:
@@ -234,8 +233,8 @@ class OCPEnv_1(gym.Env):
         for i in actual_target_proxy[:, 0].astype(int):
             self.state["proxy_list"][i] = 1.0  # 복사 대상인 proxy는 1로 설정
 
-        print(f"== after update_state ==\nproxy_state = {self.state['proxy_state'][:,1]}")
-        print(f"proxy_list_state = {self.state['proxy_list']}")
+        # print(f"== after update_state ==\nproxy_state = {self.state['proxy_state'][:,1]}")
+        # print(f"proxy_list_state = {self.state['proxy_list']}")
         # state cliping
         self.state["proxy_state"][:,1:] = np.clip(self.state["proxy_state"][:,1:],0,1) # proxy_state cliping 하기
 

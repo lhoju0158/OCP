@@ -80,10 +80,10 @@ class OCPEnv_1(gym.Env):
 
         ## 속도를 위한 코드
 
-        if self.current_step!=0 and len(temp_target_proxy)>self.n_nodes/4:
+        if self.current_step!=0 and len(temp_target_proxy)>self.n_nodes/5:
             # temp_target_proxy의 수가 너무 많은 경우 => 학습 속도를 위해서 temp_target_proxy의 수 제한하기
             # print(f"== before ==\ntemp_target_proxy = {temp_target_proxy}")
-            max_proxy_num = int(self.n_nodes/4)
+            max_proxy_num = int(self.n_nodes/5)
             # print(f"max_proxy_num = {max_proxy_num}")
             # temp_target_proxy에서 각 proxy의 현재 bandwidth 값을 가져옴
             proxy_bandwidths = {i: self.state["proxy_state"][i, 1] for i in temp_target_proxy}

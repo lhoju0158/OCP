@@ -21,7 +21,7 @@ class OCPEnv_1(gym.Env):
         self.seed = 0 # 초기 seed 값
         assign_env_config(self, kwargs) # 파라미터로 온 seed 값 지정하기
         self.storage_capacity = 1 # storage capacity = 1
-        self.sigle_proxy_capacity = 2000 
+        self.sigle_proxy_capacity = 20000 
         self.t_interval = 20
         self.step_limit = int(60 * 24 / self.t_interval) # Total steps per day based on time intervals => 총 72번의 step_limit
         self.tol =0.0 # 오차값 0으로 수정
@@ -34,7 +34,7 @@ class OCPEnv_1(gym.Env):
             "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3), dtype=np.float32), # 현재 proxy 할당 된 상태 (초기값 = 0)
             "current_video_state": spaces.Box(0,1,shape=(3,), dtype=np.float32), # 현재 step에서 할당 당하는 video의 싱테 (order, bandwidth, storage)
             "proxy_list": spaces.Box(0,1,shape=(self.n_nodes,),dtype=np.float32), # 실제로 할당 대상이 되는 proxy (할당 대상 O: 1, 할당 대상 X: 0)
-            "whole_video_demand": spaces.Box(0,1,shape=(self.step_limit,3),dtype=np.float32), # 해당 episode에서 할당 대상이 되는 video_demand의 전체 분포
+            # "whole_video_demand": spaces.Box(0,1,shape=(self.step_limit,3),dtype=np.float32), # 해당 episode에서 할당 대상이 되는 video_demand의 전체 분포
             "current_allocated_video_state": spaces.Box(0,1,shape={3,},dtype=np.float32), # 실제로 할당 된 video_state(bandwidth, storage)
         })
 
@@ -52,7 +52,7 @@ class OCPEnv_1(gym.Env):
             "proxy_state": np.zeros((self.n_nodes, 3), dtype=np.float32),
             "current_video_state": self.demand[self.current_step],
             "proxy_list": np.zeros((self.n_nodes,), dtype=np.float32),
-            "whole_video_demand": self.demand,
+            # "whole_video_demand": self.demand,
             "current_allocated_video_state": np.zeros((3,), dtype=np.float32),
         }
         self.assignment = {} # 각 step의 할당 과정 저장 배열
@@ -76,6 +76,7 @@ class OCPEnv_1(gym.Env):
             raise ValueError("Invalid action: {}".format(action))
         
         if len(temp_target_proxy) == 0: # agent의 action_space가 그 무엇도 copy하길 원하지 않을 때
+            print("len is Zero") ################  여기 수정?? 현재는 아예 할당 안되게 함
             reward = -1000 # 요구되는 bandwidth와 storage가 있는데도 불구하고 할당을 못하는 상황이니깐 reward 음수값 부여
             # print(f"In step {self.current_step},len is Zero!, current reward = {reward}")    
         else:
@@ -147,7 +148,7 @@ class OCPEnv_1(gym.Env):
 
             ## reward 관련 (reward 종류 별 중요도에 의한 가중치는 추후에 생각하기)
             # 1. step에 따라서 증가
-            reward += self.current_step
+            reward += self.current_step*10
 
             # 2. agent의 action_space가 모두 유효한지 그 차이에 대한 reward (실제 allocation도 update)
             if is_optimized: # 일단 최적화 이후
@@ -166,28 +167,35 @@ class OCPEnv_1(gym.Env):
                     idx = actual_target_proxy[:,0].astype(int)
                     actual_target_proxy[i,1] = (1-self.state["proxy_state"][idx[i],1]) # action_space에서 원하는 proxy에 남은 bandwidth
                 # print(f"actual_target_proxy = {actual_target_proxy}")
-                lost_bandwidth = self.state["current_video_state"][1]-np.sum(actual_target_proxy[:,1])
+                lost_bandwidth = max(0,self.state["current_video_state"][1]-np.sum(actual_target_proxy[:,1]))
                 # print(f"lost_bandwidth = {lost_bandwidth}")
                 # print(f"proxy_state = {self.state['proxy_state'][:,1]}")
                 reward -= lost_bandwidth * 100 # 할당에 실패한 bandwidth 만큼 가중치 빼기
+                print(f"in!! current_video_stae = {self.state['current_video_state'][1]}, actual_target_proxy = {np.sum(actual_target_proxy[:,1])}, lost_bandwidth ={lost_bandwidth} ") ######################## 여기 나중에 다시 확인
+
 
             # 3. 단일한 step에 할당된 bandwidth에 대한 reward => 독립 보상
-            reward+=np.sum(actual_target_proxy[:,1])
+            reward+=np.sum(actual_target_proxy[:,1])*10
             
-            # 4. 얼마나 균등하게 되었는가 (현재 모든 proxy 기준) => 전체 보상
-            currnet_variance = np.var(self.state["proxy_state"][:,1])
+            # # 4. 얼마나 균등하게 되었는가 (현재 모든 proxy 기준) => 전체 보상
+            # currnet_variance = np.var(self.state["proxy_state"][:,1])
 
-            if currnet_variance !=0: # reward inf 방지
-                reward+=(1/(currnet_variance*100)) # current_variance는 작을 수록 좋음
-            else:
-                reward+=1000
+            # if currnet_variance !=0: # reward inf 방지
+            #     reward+=(1/(currnet_variance*100)) # current_variance는 작을 수록 좋음
+            # else:
+            #     reward+=1000
         
         ### for checking
-        actual_target_proxy_for_print = np.zeros(len(actual_target_proxy), dtype=int)  # 적절한 크기의 배열로 초기화
-        for i in range(len(actual_target_proxy)):
-            actual_target_proxy_for_print[i] = int(actual_target_proxy[i][0])
+        # actual_target_proxy_for_print = np.zeros(len(actual_target_proxy), dtype=int)  # 적절한 크기의 배열로 초기화
+        # for i in range(len(actual_target_proxy)):
+        #     actual_target_proxy_for_print[i] = int(actual_target_proxy[i][0])
         # print(f"In step {self.current_step}, actual_target_proxy = {actual_target_proxy_for_print}, current reward = {reward}")    
         ###
+        print(f"actual_target_proxy[:,1] = {np.sum(actual_target_proxy[:,1])}, current_video_state ={self.state['current_video_state'][1]}")
+        # if actual_target_proxy[:,1]>self.state['current_video_state'][1]:
+        #     print(f"actual_target_proxy[:,1] = {actual_target_proxy[:,1]}, current_video_state ={self.state['current_video_state'][1]}")
+        #     exit(0)
+
 
         ## update_state
         self.update_state_2(actual_target_proxy)
@@ -209,7 +217,7 @@ class OCPEnv_1(gym.Env):
         # print("== before update_state ==")
         self.state["current_allocated_video_state"][0] = self.state["current_video_state"][0]
         self.state["current_allocated_video_state"][1] = 0.0 # bandwidth 초기화화
-        if len(actual_target_proxy)==0:
+        if len(actual_target_proxy)!=0:
             self.state["current_allocated_video_state"][2] = self.state["current_video_state"][2] # storage
         else:
             self.state["current_allocated_video_state"][2] = 0.0 # 그 무엇도 할당되지 않음
@@ -265,7 +273,7 @@ class OCPEnv_1(gym.Env):
         # return action_mask # 여기 flatten 유무 확인
 
     def generate_demand(self): # step마다 video의 bandwidth, storage
-        np.random.seed(self.seed)
+        # np.random.seed(self.seed)
         n = self.step_limit  # Total steps representing assessments in a day
 
         # Storage demand from normal distribution for a single object

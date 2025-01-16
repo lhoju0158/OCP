@@ -24,7 +24,7 @@ import math
 # proxy 한개 당 sum => 50
 
 # generate_demand에서 종합적으로 생서하기
-# 1.  1 ~ 1000개의 video
+# 1. 1 ~ 1000개의 video
 
 # \sum_1^1000 storage = 100, (모든 영상의 절반정도 저장), 200(25% 저장 가능) 0.1 -> storage 평균 잡기
 # \sum_1^1000 num_of_request => bandwidth 총량 조절하기 (50%, 70% ... 이런식으로 조절하기기) 대략적으로 
@@ -38,23 +38,29 @@ import math
 # 논문 비교해서 짜기
 # dfl 비교하기 => 이것도 나중에 하기
 
-
 # 1) 논문에 있는 greedy algorithm
 # 2) drl이 좋은 wordload
 class OCPEnv_1(gym.Env):
     def __init__(self, *args, **kwargs):
         self.n_nodes = 50 # proxy의 개수
+        self.step_limit = 1000 # video object의 개수
         self.seed = 0 # 초기 seed 값
         assign_env_config(self, kwargs) # 파라미터로 온 seed 값 지정하기
-        self.storage_capacity = 1 # storage capacity = 1
-        self.sigle_proxy_capacity = 20000 
-        self.t_interval = 20
-        self.step_limit = int(60 * 24 / self.t_interval) # Total steps per day based on time intervals => 총 72번의 step_limit
-        self.tol =0.0 # 오차값 0으로 수정
+        # self.storage_capacity = 1 # storage capacity = 1
+        # self.sigle_proxy_capacity = 20000 
+        # self.t_interval = 20
+        # self.step_limit = int(60 * 24 / self.t_interval) # Total steps per day based on time intervals => 총 72번의 step_limit
+        self.tol = 0.0 # 오차값 0으로 수정
         self.mask = True # mask의 유무 => MaskablePPO 사용을 위해, 이건 사실 Wrapper인 ActionMasker로 나중에 감싸기 때문에 환경코드에서는 필요 없음
-        self.num_of_total_requests = 10000 # 전체 비디오에 걸친 요청 수
+        # self.num_of_total_requests = 10000 # 전체 비디오에 걸친 요청 수 => 이거 변수로 두고 역으로 추정하기
         self.action_space = gym.spaces.MultiBinary(self.n_nodes) # video object의 경우 copy가 가능하기 때문에 
-
+        
+        # generate_demand 관련 코드
+        self.percent = 0.5 # video와 proxy간의 total bandwidth, storage 관계 percentage
+        # single capacity
+        self.single_proxy_storage = 1
+        self.single_proxy_bandwidth = 2000
+        self.num_of_total_requests = 0
         self.observation_space = spaces.Dict({
             # "action_masks": spaces.Box(0, 1, shape=(self.n_nodes,), dtype=bool), => action_space는 wrapper로 해야 한다!!
             "proxy_state": spaces.Box(0, 1, shape=(self.n_nodes, 3), dtype=np.float32), # 현재 proxy 할당 된 상태 (초기값 = 0)
@@ -287,7 +293,7 @@ class OCPEnv_1(gym.Env):
             current_video_storage = self.state["current_video_state"][2]
 
             # 노드가 현재 비디오를 수용할 수 있는지 확인
-            can_assign = (proxy_storage + current_video_storage <= self.storage_capacity + self.tol)
+            can_assign = (proxy_storage + current_video_storage <= self.single_proxy_storage + self.tol)
 
             # 액션 0과 1에 대한 마스킹 설정
             if can_assign:
@@ -304,29 +310,41 @@ class OCPEnv_1(gym.Env):
 
         # Storage demand from normal distribution for a single object
         storage_demand = np.random.normal(loc=0.5, scale=0.1, size=n)
-        storage_demand = np.clip(storage_demand, 0, 1)  # Ensure demand is within 0 to 1
+        storage_demand = np.clip(storage_demand, 0, None)  # Ensure demand is within 0 to 1
 
+        total_proxy_storage = ((self.n_nodes * self.single_proxy_storage) / self.percent)
+        storage_demand = (storage_demand / np.sum(storage_demand))*total_proxy_storage
+        
         # 고정 bandwidth 생성
         # 각 video의 고정 bandwidth는 1에서 35 사이의 Mbps를 가진다고 가정
         # Bandwidth demand from normal distribution for a single object
         bandwidth_demand = np.random.normal(loc=18, scale=6, size=n)
         bandwidth_demand = np.clip(bandwidth_demand, 1, 35)  # Ensure demand is within 0 to 1
 
+        total_proxy_bandwidth = ((self.n_nodes * self.single_proxy_bandwidth) / self.percent)
+        
         video_length = np.random.randint(30,80,size = self.step_limit) # step_limit의 개수만큼 video_length 생성
         zipf_parameter = np.random.uniform(0.3,0.7) # zipf 분포를 위한 parameter 생성
         zipf_prob = self.zipf_distribution(self.step_limit,zipf_parameter) # zipf로 생성된 인기 순위
 
         zipf_length = zipf_prob * video_length # 인기 확률에 따른 인기 요청 정도
-        zipf_length = zipf_length / sum(zipf_length) # 정규화
-        zipf_length = zipf_length * self.num_of_total_requests # 실제 값으로 변경
+        zipf_length = zipf_length / np.sum(zipf_length) # 정규화
 
-        bandwidth_demand = bandwidth_demand * zipf_length # 고정 bandwidth * 인기도 = bandwidth
+        # Calculate num_of_total_requests to match total_proxy_bandwidth
+        estimated_bandwidth_demand = bandwidth_demand * zipf_length
+        self.num_of_total_requests = ((total_proxy_bandwidth / np.sum(estimated_bandwidth_demand))//1000)*1000
+
+        print(f"self.num_of_total_requests = {self.num_of_total_requests}")
+        # Recalculate bandwidth_demand with adjusted num_of_total_requests
+        zipf_length = zipf_length * self.num_of_total_requests
+        bandwidth_demand = bandwidth_demand * zipf_length
+
         # print(f"bandwidth_demand = {bandwidth_demand}")
         # print(f"Max ={np.max(bandwidth_demand)}")
         # print(f"Min ={np.min(bandwidth_demand)}")
         # exit(0)
 
-        bandwidth_demand = bandwidth_demand/self.sigle_proxy_capacity
+        bandwidth_demand = bandwidth_demand/self.single_proxy_bandwidth
         # Combine time ratio, bandwidth, and storage demand for the single object
         demand = np.column_stack([np.arange(n) / n, bandwidth_demand, storage_demand])
 

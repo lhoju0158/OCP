@@ -15,6 +15,32 @@ import math
 
 # BSR (bandwidth to space ratio) 단위 면적당 bandwidth를 최대화 해야한다 ************ 이거 아직 안함 (일단 단일의 step에 대해서 total bandwidth caching 여부)
 
+# data를 만들 때 
+# replication... 
+# step_limit 늘리기 => 1000개 
+# data => 
+# storage demand => 
+
+# proxy 한개 당 sum => 50
+
+# generate_demand에서 종합적으로 생서하기
+# 1.  1 ~ 1000개의 video
+
+# \sum_1^1000 storage = 100, (모든 영상의 절반정도 저장), 200(25% 저장 가능) 0.1 -> storage 평균 잡기
+# \sum_1^1000 num_of_request => bandwidth 총량 조절하기 (50%, 70% ... 이런식으로 조절하기기) 대략적으로 
+# \sum _1 total bandwidth 구하기.. num_of _request 
+
+# num_of_total_request를 대비로 하게끔 변수로 두고 역으로 추정하기..
+
+# proxy의 bandwidth => 100 
+
+
+# 논문 비교해서 짜기
+# dfl 비교하기 => 이것도 나중에 하기
+
+
+# 1) 논문에 있는 greedy algorithm
+# 2) drl이 좋은 wordload
 class OCPEnv_1(gym.Env):
     def __init__(self, *args, **kwargs):
         self.n_nodes = 50 # proxy의 개수

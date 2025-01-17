@@ -57,7 +57,12 @@ class CustomTensorboardCallback(BaseCallback):
         demand = self.training_env.get_attr("demand")[0]
         # print(f"demand = {demand}")
         proxy_state = state["proxy_state"]
-        current_allocated_video_state = demand[self.num_timesteps - 1]  # 이전 환경 정보
+        if self.num_timesteps == step_limit + 1:
+            current_allocated_video_state = demand[
+                self.num_timesteps - 1
+            ]  # 이전 환경 정보
+        else:
+            current_allocated_video_state = demand[0]
         # print(f"current_allocated_video_state = {current_allocated_video_state}")
         # print(f"self.num_timesteps = {self.num_timesteps}")
 

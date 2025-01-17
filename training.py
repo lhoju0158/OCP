@@ -12,6 +12,7 @@ from torch import nn
 from stable_baselines3.common.evaluation import evaluate_policy
 from or_gym.utils import create_env
 import pandas as pd
+import torch
 
 from sb3_contrib.common.wrappers import ActionMasker
 from sb3_contrib.ppo_mask import MaskablePPO
@@ -56,16 +57,15 @@ class CustomTensorboardCallback(BaseCallback):
         demand = self.training_env.get_attr("demand")[0]
         # print(f"demand = {demand}")
         proxy_state = state["proxy_state"]
-        current_allocated_video_state = demand[self.num_timesteps-1] # 이전 환경 정보
+        current_allocated_video_state = demand[self.num_timesteps - 1]  # 이전 환경 정보
         # print(f"current_allocated_video_state = {current_allocated_video_state}")
         # print(f"self.num_timesteps = {self.num_timesteps}")
-        
+
         # current_video_state = state["current_video_state"] # update가 되서..
         current_video_state = state["current_allocated_video_state"]
 
         # print("========== In training.py ==========")
         # print(f"step_limit = {step_limit}\nstate = {state}")
-        
 
         # tensorboard에 넣어야 할 대상
         # video 관련
@@ -76,19 +76,20 @@ class CustomTensorboardCallback(BaseCallback):
         # - 할당 대상이 되는 bandwidth 중 저장되지 않은 누적 bandwidth
         # print(f"===== Let's check! ======")
         # print(f"current_video_state[1] = {current_video_state[1]}, current_allocated_video_state[2] = {current_allocated_video_state[2]}")
-        self.unallocated_video_bandwidth += max(0, (current_video_state[1] - current_allocated_video_state[1]))
+        self.unallocated_video_bandwidth += max(
+            0, round((current_video_state[1] - current_allocated_video_state[1]), 5)
+        )
         # print(f"So, self.unallocated_video_bandwidth = {self.unallocated_video_bandwidth}")
 
         # proxy 관련
         # - 현재 proxy의 누적 storage 사용량
-        self.proxy_total_storage = np.sum(proxy_state[:,2])
+        self.proxy_total_storage = np.sum(proxy_state[:, 2])
         # - 현재 proxy의 누적 bandwith 사용량
-        self.proxy_total_bandwidth = np.sum(proxy_state[:,1])
+        self.proxy_total_bandwidth = np.sum(proxy_state[:, 1])
 
         # optimize 관련련
         # - 현재 proxyd의 bandwidth 분산 계산산
         self.bandwidth_variance = np.var(proxy_state[:, 1])
-
 
         # TensorBoard에 기록
         # video 관련
@@ -107,7 +108,7 @@ class CustomTensorboardCallback(BaseCallback):
             self.unallocated_video_bandwidth,
             self.num_timesteps,
         )
-        
+
         # proxy 관련
         self.writer.add_scalar(
             "proxy/proxy_total_storage",
@@ -119,7 +120,6 @@ class CustomTensorboardCallback(BaseCallback):
             self.proxy_total_bandwidth,
             self.num_timesteps,
         )
-
 
         # optimize 관련
         self.writer.add_scalar(
@@ -184,7 +184,7 @@ def train_model(
     normalize_env: bool = True,
     activation_fn: Type[nn.Module] = nn.ReLU,
     net_arch=[256, 256],
-    n_times: int = 72 * 10,
+    n_times: int = 1000 * 100,
     verbose: int = 1,
     seed: int = 317,
 ) -> OnPolicyAlgorithm:
@@ -221,10 +221,12 @@ def train_model(
         tensorboard_log=tensorboard_log,
         verbose=verbose,
         seed=seed,
+        # device="cuda",  # GPU 사용
     )
     # ActionMasker는 단일 환경에 대해 적용되어야 한다
     # DummyVecEnv는 여러 환경을 벡터화하는 래퍼이므로, ActionMasker가 적용된 후에 래핑되어야 한다
 
+    # print(f"the availablity of GPU is {torch.cuda.is_available()}")
     callback = CustomTensorboardCallback(verbose=verbose)
     model.learn(total_timesteps=n_times, callback=callback, progress_bar=True)
 

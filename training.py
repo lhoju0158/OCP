@@ -58,7 +58,7 @@ class CustomTensorboardCallback(BaseCallback):
         # print(f"demand = {demand}")
         proxy_state = state["proxy_state"]
         current_video_state = demand[
-            (self.num_timesteps-1)%step_limit
+            (self.num_timesteps - 1) % step_limit
         ]  # 이전 환경 정보 (원하는 정보)
 
         # else:
@@ -85,7 +85,9 @@ class CustomTensorboardCallback(BaseCallback):
         self.unallocated_video_bandwidth += max(
             0, round((current_video_state[1] - current_allocated_video_state[1]), 5)
         )
-        print(f"So, in step {self.num_timesteps} and previous step {(self.num_timesteps-1)%step_limit}, self.unallocated_video_bandwidth = {self.unallocated_video_bandwidth}")
+        print(
+            f"So, in step {self.num_timesteps} and previous step {(self.num_timesteps-1)%step_limit}, self.unallocated_video_bandwidth = {self.unallocated_video_bandwidth}"
+        )
 
         # proxy 관련
         # - 현재 proxy의 누적 storage 사용량
@@ -112,6 +114,14 @@ class CustomTensorboardCallback(BaseCallback):
         self.writer.add_scalar(
             "video/unallocated_video_bandwidth",
             self.unallocated_video_bandwidth,
+            self.num_timesteps,
+        )
+        self.writer.add_scalars(
+            "video/allocated_video",
+            {
+                "allocated_video_storage": self.allocated_video_storage,
+                "allocated_video_bandwidth": self.allocated_video_bandwidth,
+            },
             self.num_timesteps,
         )
 
@@ -190,7 +200,7 @@ def train_model(
     normalize_env: bool = True,
     activation_fn: Type[nn.Module] = nn.ReLU,
     net_arch=[256, 256],
-    n_times: int = 1000 * 10,
+    n_times: int = 1000 * 50,
     verbose: int = 1,
     seed: int = 317,
 ) -> OnPolicyAlgorithm:

@@ -57,17 +57,18 @@ class CustomTensorboardCallback(BaseCallback):
         demand = self.training_env.get_attr("demand")[0]
         # print(f"demand = {demand}")
         proxy_state = state["proxy_state"]
-        if self.num_timesteps == step_limit + 1:
-            current_allocated_video_state = demand[
-                self.num_timesteps - 1
-            ]  # 이전 환경 정보
-        else:
-            current_allocated_video_state = demand[0]
-        # print(f"current_allocated_video_state = {current_allocated_video_state}")
+        current_video_state = demand[
+            (self.num_timesteps-1)%step_limit
+        ]  # 이전 환경 정보 (원하는 정보)
+
+        # else:
+        #     current_allocated_video_state = demand[0]
+        # print(f"current_video_state = {current_video_state}")
         # print(f"self.num_timesteps = {self.num_timesteps}")
 
         # current_video_state = state["current_video_state"] # update가 되서..
-        current_video_state = state["current_allocated_video_state"]
+        current_allocated_video_state = state["current_allocated_video_state"]
+        # print(f"current_allocated_video_state = {current_allocated_video_state}")
 
         # print("========== In training.py ==========")
         # print(f"step_limit = {step_limit}\nstate = {state}")
@@ -80,11 +81,11 @@ class CustomTensorboardCallback(BaseCallback):
         self.allocated_video_bandwidth += current_allocated_video_state[1]
         # - 할당 대상이 되는 bandwidth 중 저장되지 않은 누적 bandwidth
         # print(f"===== Let's check! ======")
-        # print(f"current_video_state[1] = {current_video_state[1]}, current_allocated_video_state[2] = {current_allocated_video_state[2]}")
+        # print(f"current_video_state[1] = {current_video_state[1]}, current_allocated_video_state[1] = {current_allocated_video_state[1]}")
         self.unallocated_video_bandwidth += max(
             0, round((current_video_state[1] - current_allocated_video_state[1]), 5)
         )
-        # print(f"So, self.unallocated_video_bandwidth = {self.unallocated_video_bandwidth}")
+        print(f"So, in step {self.num_timesteps} and previous step {(self.num_timesteps-1)%step_limit}, self.unallocated_video_bandwidth = {self.unallocated_video_bandwidth}")
 
         # proxy 관련
         # - 현재 proxy의 누적 storage 사용량
@@ -189,7 +190,7 @@ def train_model(
     normalize_env: bool = True,
     activation_fn: Type[nn.Module] = nn.ReLU,
     net_arch=[256, 256],
-    n_times: int = 1000 * 100,
+    n_times: int = 1000 * 10,
     verbose: int = 1,
     seed: int = 317,
 ) -> OnPolicyAlgorithm:

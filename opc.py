@@ -93,7 +93,7 @@ class OCPEnv_1(gym.Env):
         truncated = False
         reward = 0
         temp_target_proxy = np.where(action == 1)[0] # action에서 값이 1인 index의 집합 => agent가 생각하는 copy 대상
-        actual_target_proxy = np.zeros((len(temp_target_proxy), 2)) 
+        actual_target_proxy = np.zeros((len(temp_target_proxy), 2))
 
         if action.ndim != 1 or len(action) != self.n_nodes or not set(action).issubset({0, 1}): # 오류 확인
             # action이 1차원인지 (Multibinary 인지) / action이 50개로 나왔는지 / binary의 값만 가지고 있는지
@@ -181,7 +181,7 @@ class OCPEnv_1(gym.Env):
                 actual_target_proxy[:,1] = best_allocation
                 reward += (len(best_subset)-len(temp_target_proxy))
 
-            else: # 최적화가 이루어 지지 않았다 => 요구하는 bandwidth를 모두 충족하지 못함
+            else: # 최적화가 이루어 지지 않았다 => 요구하는 bandwidth를 모두 충족하지 못함 => 근데 이런 경우 있음???
                 # print(f"=============== allocation is not optimized!! ===============")
                 # print(f"temp_target_proxy = {temp_target_proxy}")
                 # print(f"current_video_state = {self.state['current_video_state'][1]}")
@@ -199,7 +199,7 @@ class OCPEnv_1(gym.Env):
 
 
             # 3. 단일한 step에 할당된 bandwidth에 대한 reward => 독립 보상
-            reward+=np.sum(actual_target_proxy[:,1])*10
+            reward+=np.sum(actual_target_proxy[:,1])*1000000 # 1000배 차이 # 100배 정도가 나을 듯
             
             # # 4. 얼마나 균등하게 되었는가 (현재 모든 proxy 기준) => 전체 보상 (균등하게 분배하는 것은 대상이 아니긴 함, total 분배가 대상이다)
             # currnet_variance = np.var(self.state["proxy_state"][:,1])
@@ -220,6 +220,7 @@ class OCPEnv_1(gym.Env):
         #     print(f"actual_target_proxy[:,1] = {actual_target_proxy[:,1]}, current_video_state ={self.state['current_video_state'][1]}")
         #     exit(0)
 
+        # print(f"so, in opc.py, current reward = {reward}, before update_state2")
 
         ## update_state
         self.update_state_2(actual_target_proxy)
@@ -231,7 +232,10 @@ class OCPEnv_1(gym.Env):
             done = True
         # print("step end!!")
         
-        return self.state, reward, done, truncated, {} # 여기 마지막 값도 info 필요 {'action_mask': self.state["action_mask"]}
+        # info 딕셔너리에 reward 포함
+        info = {'reward': reward}
+        
+        return self.state, reward, done, truncated, info
 
     # update function for version 2
     def update_state_2(self,actual_target_proxy):

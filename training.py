@@ -39,6 +39,7 @@ class CustomTensorboardCallback(BaseCallback):
         self.proxy_total_storage = 0
         self.proxy_total_bandwidth = 0
         self.bandwidth_variance = 0
+        self.accumulated_reward = 0
 
     def _on_training_start(self):
         for output_format in self.logger.output_formats:
@@ -55,6 +56,13 @@ class CustomTensorboardCallback(BaseCallback):
         step_limit = self.training_env.get_attr("step_limit")[0]
         state = self.training_env.get_attr("state")[0]
         demand = self.training_env.get_attr("demand")[0]
+        infos = self.locals.get("infos", [{}])
+        if len(infos) > 0:
+            reward = infos[0].get("reward", 0)
+        else:
+            reward = self.training_env.get_attr("reward")[
+                0
+            ]  # 환경에서 직접 reward 가져오기
         # print(f"demand = {demand}")
         proxy_state = state["proxy_state"]
         current_video_state = demand[
@@ -99,7 +107,17 @@ class CustomTensorboardCallback(BaseCallback):
         # - 현재 proxyd의 bandwidth 분산 계산산
         self.bandwidth_variance = np.var(proxy_state[:, 1])
 
+        # reward 관련
+        # - 현 episode에 누적된 reward 계산
+        self.accumulated_reward += reward
+        # print(f"in train.py, reward = {reward}")
+
         # TensorBoard에 기록
+        # reward 관련 기록
+        self.writer.add_scalar(
+            "reward/current_reward", self.accumulated_reward, self.num_timesteps
+        )
+
         # video 관련
         self.writer.add_scalar(
             "video/allocated_video_storage",
@@ -157,6 +175,7 @@ class CustomTensorboardCallback(BaseCallback):
         self.proxy_total_storage = 0
         self.proxy_total_bandwidth = 0
         self.bandwidth_variance = 0
+        self.accumulated_reward = 0
         # print("Episode ended, resetting cumulative bandwidth values.")
 
     def _on_training_end(self):
@@ -200,7 +219,7 @@ def train_model(
     normalize_env: bool = True,
     activation_fn: Type[nn.Module] = nn.ReLU,
     net_arch=[256, 256],
-    n_times: int = 1000 * 50,
+    n_times: int = 1000 * 3,
     verbose: int = 1,
     seed: int = 317,
 ) -> OnPolicyAlgorithm:

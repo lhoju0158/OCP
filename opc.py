@@ -105,7 +105,7 @@ class OCPEnv_1(gym.Env):
         
         if len(temp_target_proxy) == 0: # agent의 action_space가 그 무엇도 copy하길 원하지 않을 때
             print("len is Zero") ################  여기 수정?? 현재는 아예 할당 안되게 함
-            reward = -1000 # 요구되는 bandwidth와 storage가 있는데도 불구하고 할당을 못하는 상황이니깐 reward 음수값 부여
+            reward = -10 # 요구되는 bandwidth와 storage가 있는데도 불구하고 할당을 못하는 상황이니깐 reward 음수값 부여
             # print(f"In step {self.current_step},len is Zero!, current reward = {reward}")    
         else:
             ## 속도를 위한 코드
@@ -135,42 +135,18 @@ class OCPEnv_1(gym.Env):
 
             # 다시 짜기! => for구문 빼기 
             if self.current_step !=0: # 학습 속도를 위해서 최적화 조건 조절
-                for subset_size in range(1,len(temp_target_proxy) +1):
-                    subsets = [list(comb) for comb in itertools.combinations(indices, subset_size)]
+                   # temp_target_proxy가 비어 있지 않다는 전제하에 진행
+                total_bandwidth = self.state["current_video_state"][1]  # 현재 필요한 bandwidth
+                current_bandwidths = self.state["proxy_state"][:, 1][temp_target_proxy]  # 현재 proxy들의 bandwidth
+                available_bandwidths = 1.0 - current_bandwidths  # 남은 bandwidth 공간
+                normalized_bandwidths = available_bandwidths / np.sum(available_bandwidths)  # 남은 bandwidth 비율로 분배
 
-                    for subset in subsets:
-                        # 실제 index 매핑
-                        subset_indices = [temp_target_proxy[i] for i in subset]
-
-                        # 초기값 및 제약 조건 설정
-                        x0 = np.zeros(len(subset))
-                        bounds = [(0, 1.0 - self.state["proxy_state"][i,1]) for i in subset_indices]
-
-                        constraints = [
-                            {"type": "eq", "fun": lambda x: np.sum(x) - self.state["current_video_state"][1]}  # bandwidth 분배
-                        ]
-
-                        # 목적 함수: 선택된 subset에 대한 균등성 평가
-                        def objective(x):
-                            b_final = self.state["proxy_state"][:,1].copy()
-                            for i, xi in zip(subset_indices, x):
-                                b_final[i] += xi
-                            mu = np.mean(b_final)
-                            variance = np.mean((b_final - mu) ** 2)
-                            return variance
-
-                        # 최적화 실행
-                        result = minimize(objective, x0, bounds=bounds, constraints=constraints)
-
-                        if result.success:
-                            # 현재 subset의 결과가 가장 작은 분산을 가지는지 확인
-                            if result.fun < best_variance:
-                                is_optimized = True
-                                best_variance = result.fun
-                                best_subset = subset_indices
-                                best_allocation = result.x  
+                # 남은 bandwidth 비율에 따라 직접 할당 (최적화 없이 간소화)
+                best_allocation = total_bandwidth * normalized_bandwidths  # 균등 분배
+                best_subset = temp_target_proxy
+                # is_optimized = True
             else: # self.current_step == 0
-                is_optimized = True
+                # is_optimized = True
                 best_subset = temp_target_proxy
                 best_allocation = [self.state["current_video_state"][1]/len(best_subset)]*len(best_subset)
 
@@ -181,27 +157,27 @@ class OCPEnv_1(gym.Env):
             # reward += self.current_step*10
 
             # 2. agent의 action_space가 모두 유효한지 그 차이에 대한 reward (실제 allocation도 update)
-            if is_optimized: # 일단 최적화 이후
-                actual_target_proxy = np.zeros((len(best_subset), 2))
-                actual_target_proxy[:,0] = best_subset
-                actual_target_proxy[:,1] = best_allocation
-                reward += (len(best_subset)-len(temp_target_proxy))
+            # if is_optimized: # 일단 최적화 이후
+            actual_target_proxy = np.zeros((len(best_subset), 2))
+            actual_target_proxy[:,0] = best_subset
+            actual_target_proxy[:,1] = best_allocation
+            reward += (len(best_subset)-len(temp_target_proxy))
 
-            else: # 최적화가 이루어 지지 않았다 => 요구하는 bandwidth를 모두 충족하지 못함 => 근데 이런 경우 있음???
-                # print(f"=============== allocation is not optimized!! ===============")
-                # print(f"temp_target_proxy = {temp_target_proxy}")
-                # print(f"current_video_state = {self.state['current_video_state'][1]}")
-                actual_target_proxy = np.zeros((len(temp_target_proxy), 2))
-                actual_target_proxy[:,0] = temp_target_proxy
-                for i in range(len(actual_target_proxy)):
-                    idx = actual_target_proxy[:,0].astype(int)
-                    actual_target_proxy[i,1] = (1-self.state["proxy_state"][idx[i],1]) # action_space에서 원하는 proxy에 남은 bandwidth
-                # print(f"actual_target_proxy = {actual_target_proxy}")
-                lost_bandwidth = max(0,self.state["current_video_state"][1]-np.sum(actual_target_proxy[:,1]))
-                # print(f"lost_bandwidth = {lost_bandwidth}")
-                # print(f"proxy_state = {self.state['proxy_state'][:,1]}")
-                reward -= lost_bandwidth * 100 # 할당에 실패한 bandwidth 만큼 가중치 빼기
-                print(f"in!! current_video_stae = {self.state['current_video_state'][1]}, actual_target_proxy = {np.sum(actual_target_proxy[:,1])}, lost_bandwidth ={lost_bandwidth} ") ######################## 여기 나중에 다시 확인
+            # else: # 최적화가 이루어 지지 않았다 => 요구하는 bandwidth를 모두 충족하지 못함 => 근데 이런 경우 있음???
+            #     # print(f"=============== allocation is not optimized!! ===============")
+            #     # print(f"temp_target_proxy = {temp_target_proxy}")
+            #     # print(f"current_video_state = {self.state['current_video_state'][1]}")
+            #     actual_target_proxy = np.zeros((len(temp_target_proxy), 2))
+            #     actual_target_proxy[:,0] = temp_target_proxy
+            #     for i in range(len(actual_target_proxy)):
+            #         idx = actual_target_proxy[:,0].astype(int)
+            #         actual_target_proxy[i,1] = (1-self.state["proxy_state"][idx[i],1]) # action_space에서 원하는 proxy에 남은 bandwidth
+            #     # print(f"actual_target_proxy = {actual_target_proxy}")
+            #     lost_bandwidth = max(0,self.state["current_video_state"][1]-np.sum(actual_target_proxy[:,1]))
+            #     # print(f"lost_bandwidth = {lost_bandwidth}")
+            #     # print(f"proxy_state = {self.state['proxy_state'][:,1]}")
+            #     reward -= lost_bandwidth * 100 # 할당에 실패한 bandwidth 만큼 가중치 빼기
+            #     print(f"in!! current_video_stae = {self.state['current_video_state'][1]}, actual_target_proxy = {np.sum(actual_target_proxy[:,1])}, lost_bandwidth ={lost_bandwidth} ") ######################## 여기 나중에 다시 확인
 
 
             # 3. 단일한 step에 할당된 bandwidth에 대한 reward => 독립 보상

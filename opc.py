@@ -104,7 +104,7 @@ class OCPEnv_1(gym.Env):
             raise ValueError("Invalid action: {}".format(action))
         
         if len(temp_target_proxy) == 0: # agent의 action_space가 그 무엇도 copy하길 원하지 않을 때
-            print("len is Zero") ################  여기 수정?? 현재는 아예 할당 안되게 함
+            # print("len is Zero") ################  여기 수정?? 현재는 아예 할당 안되게 함
             reward = -10 # 요구되는 bandwidth와 storage가 있는데도 불구하고 할당을 못하는 상황이니깐 reward 음수값 부여
             # print(f"In step {self.current_step},len is Zero!, current reward = {reward}")    
         else:
@@ -131,7 +131,7 @@ class OCPEnv_1(gym.Env):
             best_subset = None # action_space 중에서 최종적으로 
             best_allocation = None
             is_optimized = False
-            print(f"temp_target_proxy = {temp_target_proxy}")
+            # print(f"temp_target_proxy = {temp_target_proxy}")
 
             # 다시 짜기! => for구문 빼기 
             if self.current_step !=0: # 학습 속도를 위해서 최적화 조건 조절
@@ -197,7 +197,7 @@ class OCPEnv_1(gym.Env):
         #     actual_target_proxy_for_print[i] = int(actual_target_proxy[i][0])
         # print(f"In step {self.current_step}, actual_target_proxy = {actual_target_proxy_for_print}, current reward = {reward}")    
         ###
-        print(f"actual_target_proxy[:,1] = {np.sum(actual_target_proxy[:,1])}, current_video_state ={self.state['current_video_state'][1]}")
+        # print(f"actual_target_proxy[:,1] = {np.sum(actual_target_proxy[:,1])}, current_video_state ={self.state['current_video_state'][1]}")
         # if actual_target_proxy[:,1]>self.state['current_video_state'][1]:
         #     print(f"actual_target_proxy[:,1] = {actual_target_proxy[:,1]}, current_video_state ={self.state['current_video_state'][1]}")
         #     exit(0)

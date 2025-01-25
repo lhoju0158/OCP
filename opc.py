@@ -13,6 +13,8 @@ import math
 # stable-baselines3[extra]
 # shimmy            - 1.3.0 => 2.0.0
 
+# reward 계산을 simple하게 바꾸기
+
 # BSR (bandwidth to space ratio) 단위 면적당 bandwidth를 최대화 해야한다 => 여기서 말하는 space가 저장 대상이 되는 proxy인가 아니면 allocated된 video storage인가
 
 
@@ -129,6 +131,7 @@ class OCPEnv_1(gym.Env):
             is_optimized = False
             print(f"temp_target_proxy = {temp_target_proxy}")
 
+            # 다시 짜기! => for구문 빼기 
             if self.current_step !=0: # 학습 속도를 위해서 최적화 조건 조절
                 for subset_size in range(1,len(temp_target_proxy) +1):
                     subsets = [list(comb) for comb in itertools.combinations(indices, subset_size)]

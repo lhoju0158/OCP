@@ -219,7 +219,7 @@ def train_model(
     normalize_env: bool = True,
     activation_fn: Type[nn.Module] = nn.ReLU,
     net_arch=[256, 256],
-    n_times: int = 1000 * 3,
+    n_times: int = 1000 * 3, # 100만번으로 하기
     verbose: int = 1,
     seed: int = 317,
 ) -> OnPolicyAlgorithm:

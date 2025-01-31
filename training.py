@@ -93,9 +93,9 @@ class CustomTensorboardCallback(BaseCallback):
         self.unallocated_video_bandwidth += max(
             0, round((current_video_state[1] - current_allocated_video_state[1]), 5)
         )
-        print(
-            f"So, in step {self.num_timesteps} and previous step {(self.num_timesteps-1)%step_limit}, self.unallocated_video_bandwidth = {self.unallocated_video_bandwidth}"
-        )
+        # print(
+        #     f"So, in step {self.num_timesteps} and previous step {(self.num_timesteps-1)%step_limit}, self.unallocated_video_bandwidth = {self.unallocated_video_bandwidth}"
+        # )
 
         # proxy 관련
         # - 현재 proxy의 누적 storage 사용량
@@ -215,11 +215,11 @@ def train_model(
     tensorboard_log: str = "./OCP_test",
     algorithm_class: Type[OnPolicyAlgorithm] = MaskablePPO,
     gamma: float = 0.99,
-    learning_rate: float = 0.0003,
+    learning_rate: float = 0.0004,
     normalize_env: bool = True,
     activation_fn: Type[nn.Module] = nn.ReLU,
     net_arch=[256, 256],
-    n_times: int = 1000 * 3, # 100만번으로 하기
+    n_times: int = 1000 * 1000,  # 추후에 100만으로 변경하기
     verbose: int = 1,
     seed: int = 317,
 ) -> OnPolicyAlgorithm:

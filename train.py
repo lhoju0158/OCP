@@ -19,11 +19,11 @@ from sb3_contrib.ppo_mask import MaskablePPO
 GRID = {
     "algorithm_class": [MaskablePPO],
     "gamma": [0.99],
-    "learning_rate": [0.0003],
+    "learning_rate": [0.0001, 0.00005],
     "normalize_env": [True],
     "activation_fn": [nn.LeakyReLU],
     "net_arch": [
-        [256, 256],
+        [128, 128],
         # 은닉층의 뉴런 개수
     ],
 }

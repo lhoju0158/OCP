@@ -5,6 +5,7 @@ from gymnasium import spaces
 import inspect
 from scipy.optimize import minimize
 import itertools
+import time
 import math
 # lib list
 # gymnasium         - 0.28.1 => 1.0.0
@@ -105,7 +106,7 @@ class OCPEnv_1(gym.Env):
         
         if len(temp_target_proxy) == 0: # agent의 action_space가 그 무엇도 copy하길 원하지 않을 때
             # print("len is Zero") ################  여기 수정?? 현재는 아예 할당 안되게 함
-            reward = -10 # 요구되는 bandwidth와 storage가 있는데도 불구하고 할당을 못하는 상황이니깐 reward 음수값 부여
+            reward = -5 # 요구되는 bandwidth와 storage가 있는데도 불구하고 할당을 못하는 상황이니깐 reward 음수값 부여
             # print(f"In step {self.current_step},len is Zero!, current reward = {reward}")    
         else:
             ## 속도를 위한 코드
@@ -135,7 +136,7 @@ class OCPEnv_1(gym.Env):
 
             # 다시 짜기! => for구문 빼기 
             if self.current_step !=0: # 학습 속도를 위해서 최적화 조건 조절
-                   # temp_target_proxy가 비어 있지 않다는 전제하에 진행
+                # temp_target_proxy가 비어 있지 않다는 전제하에 진행
                 total_bandwidth = self.state["current_video_state"][1]  # 현재 필요한 bandwidth
                 current_bandwidths = self.state["proxy_state"][:, 1][temp_target_proxy]  # 현재 proxy들의 bandwidth
                 available_bandwidths = 1.0 - current_bandwidths  # 남은 bandwidth 공간
@@ -179,7 +180,7 @@ class OCPEnv_1(gym.Env):
             #     reward -= lost_bandwidth * 100 # 할당에 실패한 bandwidth 만큼 가중치 빼기
             #     print(f"in!! current_video_stae = {self.state['current_video_state'][1]}, actual_target_proxy = {np.sum(actual_target_proxy[:,1])}, lost_bandwidth ={lost_bandwidth} ") ######################## 여기 나중에 다시 확인
 
-
+            time.sleep(0.2)
             # 3. 단일한 step에 할당된 bandwidth에 대한 reward => 독립 보상
             reward+=np.sum(actual_target_proxy[:,1])*100 # 1000배 차이 # 100배 정도가 나을 듯
             

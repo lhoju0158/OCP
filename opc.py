@@ -14,11 +14,9 @@ import math
 # stable-baselines3[extra]
 # shimmy            - 1.3.0 => 2.0.0
 
-# reward 계산을 simple하게 바꾸기 => bandwidth를 정확히 반영하는 방향으로
-# 최적화 코드 줄여서 속도 늘리기
-# 학습횟수 100만으로 변경
+# reward 계산을 simple하게 바꾸기
 
-# BSR (bandwidth to space ratio) 단위 면적당 bandwidth를 최대화
+# BSR (bandwidth to space ratio) 단위 면적당 bandwidth를 최대화 해야한다 => 여기서 말하는 space가 저장 대상이 되는 proxy인가 아니면 allocated된 video storage인가
 
 
 # data를 만들 때 
@@ -151,11 +149,10 @@ class OCPEnv_1(gym.Env):
                 best_subset = temp_target_proxy
                 best_allocation = [self.state["current_video_state"][1]/len(best_subset)]*len(best_subset)
 
-            # reward simple하게 변경하기
 
             ## reward 관련 (reward 종류 별 중요도에 의한 가중치는 추후에 생각하기)
-            # # 1. step에 따라서 증가
-            # reward += self.current_step*10
+            # 1. step에 따라서 증가
+            reward += self.current_step*10
 
             # 2. agent의 action_space가 모두 유효한지 그 차이에 대한 reward (실제 allocation도 update)
             # if is_optimized: # 일단 최적화 이후
@@ -182,7 +179,7 @@ class OCPEnv_1(gym.Env):
 
             time.sleep(0.2)
             # 3. 단일한 step에 할당된 bandwidth에 대한 reward => 독립 보상
-            reward+=np.sum(actual_target_proxy[:,1])*100 # 1000배 차이 # 100배 정도가 나을 듯
+            reward+=np.sum(actual_target_proxy[:,1])*1000000 # 1000배 차이 # 100배 정도가 나을 듯
             
             # # 4. 얼마나 균등하게 되었는가 (현재 모든 proxy 기준) => 전체 보상 (균등하게 분배하는 것은 대상이 아니긴 함, total 분배가 대상이다)
             # currnet_variance = np.var(self.state["proxy_state"][:,1])
